@@ -1,0 +1,167 @@
+{
+  "summary": {
+    "n": 8,
+    "hit_rate": 1.0,
+    "abstention_rate": 0.625,
+    "mean_claim_support": 0.375,
+    "mean_req_recall": 0.0,
+    "version_precision": 1.0,
+    "module_precision": 1.0,
+    "p50_latency_s": 21.366
+  },
+  "results": [
+    {
+      "query_id": "q-0001",
+      "intent": "definition",
+      "hit": true,
+      "evidence": 12,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 1.0,
+      "confidence": {
+        "confidence": 0.6881,
+        "level": "Medium",
+        "should_abstain": false,
+        "version_consistent": true,
+        "evidence_coverage": 1.0
+      },
+      "latency_s": 42.057,
+      "abstained": false
+    },
+    {
+      "query_id": "q-0002",
+      "intent": "unknown",
+      "hit": true,
+      "evidence": 12,
+      "req_recall": 0.0,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 1.0,
+      "confidence": {
+        "confidence": 0.6847,
+        "level": "Medium",
+        "should_abstain": false,
+        "version_consistent": true,
+        "evidence_coverage": 1.0
+      },
+      "latency_s": 44.495,
+      "abstained": false
+    },
+    {
+      "query_id": "q-0003",
+      "intent": "deep_explanation",
+      "hit": true,
+      "evidence": 12,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 1.0,
+      "confidence": {
+        "confidence": 0.6583,
+        "level": "Medium",
+        "should_abstain": false,
+        "version_consistent": true,
+        "evidence_coverage": 1.0
+      },
+      "latency_s": 41.203,
+      "abstained": false
+    },
+    {
+      "query_id": "q-0004",
+      "intent": "api_lookup",
+      "hit": null,
+      "evidence": 0,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 0.0,
+      "confidence": {
+        "confidence": 0.2,
+        "level": "Low",
+        "should_abstain": true,
+        "version_consistent": true,
+        "evidence_coverage": 0.0
+      },
+      "latency_s": 14.171,
+      "abstained": true
+    },
+    {
+      "query_id": "q-0005",
+      "intent": "comparison",
+      "hit": null,
+      "evidence": 0,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 0.0,
+      "confidence": {
+        "confidence": 0.2,
+        "level": "Low",
+        "should_abstain": true,
+        "version_consistent": true,
+        "evidence_coverage": 0.0
+      },
+      "latency_s": 17.344,
+      "abstained": true
+    },
+    {
+      "query_id": "q-0006",
+      "intent": "dependency",
+      "hit": null,
+      "evidence": 0,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 0.0,
+      "confidence": {
+        "confidence": 0.2,
+        "level": "Low",
+        "should_abstain": true,
+        "version_consistent": true,
+        "evidence_coverage": 0.0
+      },
+      "latency_s": 16.181,
+      "abstained": true
+    },
+    {
+      "query_id": "q-0007",
+      "intent": "troubleshooting",
+      "hit": null,
+      "evidence": 0,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 0.0,
+      "confidence": {
+        "confidence": 0.2,
+        "level": "Low",
+        "should_abstain": true,
+        "version_consistent": true,
+        "evidence_coverage": 0.0
+      },
+      "latency_s": 21.366,
+      "abstained": true
+    },
+    {
+      "query_id": "q-0008",
+      "intent": "dependency",
+      "hit": null,
+      "evidence": 0,
+      "req_recall": null,
+      "version_ok": true,
+      "module_ok": true,
+      "claim_support_rate": 0.0,
+      "confidence": {
+        "confidence": 0.2,
+        "level": "Low",
+        "should_abstain": true,
+        "version_consistent": true,
+        "evidence_coverage": 0.0
+      },
+      "latency_s": 12.267,
+      "abstained": true
+    }
+  ],
+  "note": "95%-style claims forbidden: report named metrics + slices only."
+}

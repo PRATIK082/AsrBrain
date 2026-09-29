@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.ruff_cache/
+.env
+.venv/
+venv/
+data/canonical/
+data/indexes/
+*.db
+*.sqlite
+qdrant_storage/
+storage/
+ollama_models/
+.DS_Store
+Thumbs.db
+.pytest_cache/
+.coverage
+# user uploads must never be committed
+pdf/uploads/
+# frontend build artefacts
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+# local Streamlit secrets
+.streamlit/secrets.toml

@@ -1,0 +1,20 @@
+# Migration Risk Register — canonical rebuild (non-destructive)
+
+Principle (spec §27): freeze current system, shadow the new pipeline, switch traffic gradually. Never discard working retrieval until the replacement beats it on the benchmark. Note: no RDF exists in this repo, so RDF-migration steps are recorded as no-ops, not deleted functionality.
+
+| ID | Risk | Likelihood / Impact | Mitigation | Owner gate |
+|---|---|---|---|---|
+| R1 | Scope creep: rebuilding everything at once; breaking the one working path (SOME/IP lookup) | H / H | Phase 1 = Postgres/DuckDB canonical store + Qdrant (dense+BM25+filters+RRF) + FastAPI + Streamlit only. OpenSearch (Phase 2) and graph (Phase 3) behind flags | Do not start Phase 2 until §22 retrieval metrics ≥ baseline on gold set |
+| R2 | Corpus gap: 1 Foundation PDF vs. 3–5 GB Classic/Adaptive target; benchmark classes B–H unmeasurable | H / H | Freeze corpus manifest (sha256 per PDF); build gold benchmark only from indexed docs first, mark cross-version items `needs_human_validation`; ingestion quality report per PDF (§4), quarantine low-score PDFs | Block "comparison/version" claims until ≥2 releases indexed |
+| R3 | Extraction regression: new pipeline (PyMuPDF/layout/tables) misreads pages the old pypdf path happened to get right | M / H | Shadow mode: old + new indexed in parallel; page-level + requirement-level alignment check (§27 step 6); per-PDF quality JSON (low-text pages, OCR pages, tables/requirements/headings counts) | No traffic switch for a document until alignment passes |
+| R4 | Metadata invention: LLM-derived release/platform/module silently mislabels chunks | M / H | Deterministic parsers first (filename + cover-page + header regex + release table §6); LLM enrichment schema-validated only; never silently mix releases — emit "release not found, available: …" | Version-filter precision measured (§22); fail closed |
+| R5 | Index incompatibility: 3 SQLite schemas + `eval` metadata + Windows paths don't port to Qdrant/Postgres/Docker | M / M | One-off exporter: normalise `pdf\` → POSIX, `str()` → JSON, recompute sha256 (mtime-hash is not identity); rebuild vectors instead of porting BLOBs (TF-IDF dims are refit-unstable) | Exporter is throwaway; canonical store is source of truth after cutover |
+| R6 | Retrieval tuning by intuition (RRF k, weights, top_k, embedder choice) | M / M | Ablations A–J (§23) on held-out judgments; embedder shootout (BGE-M3 / E5 / Jina / Nomic / Qwen3) on AUTOSAR bench, not reputation; log every stage | No weight committed without benchmark delta |
+| R7 | Uncited/generic answers leak through during migration | M / H | Hard rules (§28.10–12): never return uncited technical answer; never substitute LLM knowledge for failed retrieval; claim-level verifier + abstain path live from day one of new API | Verifier blocks response, not just warns |
+| R8 | Dead-code traps: duplicate fns, dead ollama fallback, `eval`, IVF over-partitioning | L / M | Touch-only-with-tests; pin deps (`requirements.txt` + freeze) before edits; fix `eval`→`json`, dedup fns, set nlist by corpus size | Unit tests for store + retrieval before refactor |
+| R9 | Ops: no Compose/healthchecks/volumes; PDFs baked into images; GPU/CPU variance unmeasured | M / M | Compose profiles (minimal/standard/full, §25); volumes for indexes; Ollama/embedding/rerank models env-configurable (§21); p50/p95 + memory in eval reports | Minimal profile runs CPU-only before GPU tuning |
+| R10 | False "95% accuracy" claims | L / H | Accuracy always reported as named metric + benchmark slice (§22: faithfulness, citation P/R, version correctness, abstention correctness); `reports/evaluation/*.json + comparison.md` required | No percentage in UI/docs without benchmark evidence |
+
+## Shadow-mode checklist (§27 steps 1–13, adapted)
+
+1. `pip freeze` + record baseline answers on gold set (old system). 2–4. RDF export/map — **N/A, recorded**. 5. Re-extract to canonical hierarchy. 6. Alignment validation. 7–9. Build Qdrant (+OpenSearch/graph per phase). 10. Old vs new on same benchmark. 11–13. Shadow → compare citations → gradual switch.
