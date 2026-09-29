@@ -1,0 +1,4 @@
+* text=auto
+*.pdf binary
+*.db binary
+*.npz binary
