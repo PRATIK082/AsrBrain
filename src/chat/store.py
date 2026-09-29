@@ -120,3 +120,29 @@ class ChatStore:
         c.commit()
         c.close()
         return fid
+
+    # ---- portable session bundles: save once, resume in any later session ----
+    def export_bundle(self, cid: str) -> dict | None:
+        conv = self.get(cid)
+        if not conv:
+            return None
+        return {"format": "autosar-session/1", "title": conv["title"],
+                "slots": conv["slots"], "messages": conv["messages"]}
+
+    def import_bundle(self, bundle: dict) -> dict:
+        if bundle.get("format") != "autosar-session/1":
+            raise ValueError("not an autosar-session bundle")
+        conv = self.create(bundle.get("title", "Imported session"))
+        cid = conv["id"]
+        c = _conn(self.path)
+        c.execute("UPDATE conversations SET slots_json = ? WHERE id = ?",
+                  (json.dumps(bundle.get("slots", {})), cid))
+        for m in bundle.get("messages", []):
+            if m.get("role") in ("user", "assistant"):
+                c.execute("INSERT INTO messages VALUES (?,?,?,?,?,?)",
+                          ("msg-" + uuid.uuid4().hex[:10], cid, m["role"],
+                           m.get("content", ""), time.time(), json.dumps(m.get("meta", {}))))
+        c.commit()
+        c.close()
+        return {"id": cid, "title": conv["title"],
+                "imported_messages": len(bundle.get("messages", []))}

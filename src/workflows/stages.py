@@ -21,19 +21,31 @@ STAGES = ["query_understanding", "retrieval_planning", "text_retrieval", "table_
 
 def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = None,
                cancel: dict | None = None, known_slots: dict | None = None,
-               top_k: int = 0) -> Iterator[dict]:
+               top_k: int = 0, history: list[dict] | None = None) -> Iterator[dict]:
     """Yield event dicts: status | clarify | evidence | token | complete."""
     from ..retrieval.query_understanding import parse  # noqa: F401 (stage marker)
     from ..retrieval.normalize import correct_query
     from .suggest import suggest
     cancel = cancel or {}
+    # multi-turn: carry the previous exchange into retrieval so follow-ups reuse
+    # session context instead of re-deriving everything from scratch
+    retrieval_query = query
+    if history:
+        last_user = next((m.get("content", "") for m in reversed(history)
+                          if m.get("role") == "user"), "")
+        last_asst = next((m.get("content", "") for m in reversed(history)
+                          if m.get("role") == "assistant"), "")
+        if last_user and last_user != query:
+            retrieval_query = f"{query} [context: {last_user[:200]} | {last_asst[:300]}]"
     # spell-tolerant input: auto-correct before anything else, keep the record
-    corrected, corrections = correct_query(query)
+    corrected, corrections = correct_query(retrieval_query)
     if corrections:
         yield {"event": "status", "stage": "normalizing",
                "message": "Interpreted as: “" + corrected + "”",
                "corrections": corrections}
         query = corrected
+    # generation/abstain text uses the clean question; retrieval keeps the context tail
+    display_query = query.split(" [context:")[0]
     yield {"event": "status", "stage": "query_understanding",
            "message": "Identifying release, platform, module, and intent"}
     if cancel.get("stop"):
@@ -85,11 +97,11 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
                "relevance": c.get("rerank_score", 0.0), "label": f"E{i}"}
     yield {"event": "status", "stage": "answer_drafting", "message": "Drafting cited answer"}
     comparison = plan.get("release_mode") == "comparison"
-    gen = _generate(query, evidence, comparison, spec)
+    gen = _generate(display_query, evidence, comparison, spec)
     draft = gen["draft"]
     # stream draft tokens (real provider stream when available, else chunked replay)
     if spec is not None:
-        streamed = "".join(_stream_tokens(build_prompt(query, evidence, comparison,
+        streamed = "".join(_stream_tokens(build_prompt(display_query, evidence, comparison,
                                                         plan.get("intent", "")), spec))
         tokens_text = streamed or draft
     else:
@@ -104,7 +116,7 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
     verification = verify(tokens_text, evidence, plan)
     conf = confidence_score(ret["retrieval_score"], evidence, verification, plan)
     if conf["should_abstain"]:
-        final = abstain_message(query, plan, evidence)
+        final = abstain_message(display_query, plan, evidence)
     else:
         final = tokens_text + "\n\n## Sources\n" + citation_block(evidence)
     try:

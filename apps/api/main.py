@@ -180,6 +180,22 @@ def api_conv_delete(cid: str):
     return {"ok": True}
 
 
+@app.get("/api/conversations/{cid}/export")
+def api_conv_export(cid: str):
+    bundle = _store.export_bundle(cid)
+    if not bundle:
+        raise HTTPException(404, "conversation not found")
+    return bundle
+
+
+@app.post("/api/conversations/import")
+def api_conv_import(bundle: dict):
+    try:
+        return _store.import_bundle(bundle)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/chat")
 def api_chat(req: ChatRequest):
     cid = req.conversation_id or _store.create().get("id")
@@ -190,10 +206,12 @@ def api_chat(req: ChatRequest):
     slots = _store.get_slots(cid) | _slots_from_req(req)
     if req.mode != "auto":
         slots["mode"] = req.mode
+    prior = [{"role": m["role"], "content": m["content"]}
+             for m in (_store.get(cid) or {}).get("messages", [])]
     _store.add_message(cid, "user", req.message)
     spec = _provider_spec(req)
     cancel: dict = {}
-    events = list(run_staged(get_pipe(), req.message, spec, cancel, slots))
+    events = list(run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior))
     final = next((e for e in reversed(events) if e.get("event") == "complete"), None)
     clarify = next((e for e in events if e.get("event") == "clarify"), None)
     if clarify is not None:
@@ -201,7 +219,9 @@ def api_chat(req: ChatRequest):
         return {"conversation_id": cid, "needs_clarification": True, **clarify}
     answer = (final or {}).get("answer", "")
     _store.add_message(cid, "assistant", answer,
-                       {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", "")})
+                       {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", ""),
+                        "plan": (final or {}).get("plan", {}),
+                        "followups": (final or {}).get("followups", [])})
     return {"conversation_id": cid, "needs_clarification": False, **(final or {})}
 
 
@@ -211,6 +231,8 @@ def api_chat_stream(req: ChatRequest):
     _store.merge_slots(cid, releases=req.release_filter, platforms=req.platform_filter,
                        modules=req.module_filter)
     slots = _store.get_slots(cid) | _slots_from_req(req)
+    prior = [{"role": m["role"], "content": m["content"]}
+             for m in (_store.get(cid) or {}).get("messages", [])]
     _store.add_message(cid, "user", req.message)
     spec = _provider_spec(req)
     _cancel[cid] = False
@@ -219,7 +241,7 @@ def api_chat_stream(req: ChatRequest):
     def gen():
         answer_parts: list[str] = []
         last: dict = {}
-        for ev in run_staged(get_pipe(), req.message, spec, cancel, slots):
+        for ev in run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior):
             if _cancel.get(cid):
                 ev = {"event": "status", "stage": "cancelled", "message": "stopped"}
                 yield f"data: {json.dumps(ev)}\n\n"
@@ -231,7 +253,9 @@ def api_chat_stream(req: ChatRequest):
             yield f"data: {json.dumps(ev)}\n\n"
         if last.get("answer"):
             _store.add_message(cid, "assistant", last["answer"],
-                               {"trace": last.get("trace", {}), "llm": last.get("llm", "")})
+                               {"trace": last.get("trace", {}), "llm": last.get("llm", ""),
+                                "plan": last.get("plan", {}), "graph": last.get("graph", []),
+                                "followups": last.get("followups", [])})
         elif answer_parts:
             _store.add_message(cid, "assistant", "".join(answer_parts), {"partial": True})
 
