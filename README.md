@@ -38,6 +38,21 @@ questions (grounded in the retrieved APIs/requirements/modules) or just type you
 Spelling is auto-corrected before retrieval (`can if` → `CanIf`, `configurare` → `configure`;
 identifiers, versions, and citations are never rewritten) with an “Interpreted as” note.
 
+## Sessions: no re-loading, models per chat
+
+- **Everything persists**: messages, release/platform/module slots, evidence cards, traces,
+  follow-ups, and the model each chat uses — close the app, reopen, and continue. The
+  Evidence/Trace/Graph tabs rehydrate from the saved context.
+- **Follow-ups reuse context**: the previous exchange travels with the next question, so
+  “its message format?” resolves against the prior SOME/IP answer without re-deriving state.
+- **Different AI per workstream**: each conversation remembers its provider/model. **⑂ Fork
+  with another model** clones the slots into a fresh history — pick another Ollama model or a
+  cloud key and start the same topic elsewhere.
+- **Portable save files**: sidebar → 💾 Session save/resume exports a `.json` bundle
+  (messages + slots + model); import it here or on another machine. Same via
+  `GET /api/conversations/{id}/export` + `POST /api/conversations/import`. The index itself
+  stays on disk (`data/indexes/`) — sessions never trigger re-ingest.
+
 ## Architecture
 
 ```

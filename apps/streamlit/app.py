@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]  # repo root (…/apps/streamlit/app.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import json
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -102,10 +103,22 @@ if "cid" not in st.session_state:
     st.session_state.cid = convs[0]["id"] if convs else store.create()["id"]
 if "provider" not in st.session_state:
     st.session_state.provider = "ollama"
-if "stop_flag" not in st.session_state:
-    st.session_state.stop_flag = {}
 if "editing" not in st.session_state:
     st.session_state.editing = {}
+
+# per-conversation model: opening a chat restores the model it used last,
+# so different AI models keep their own context and can start work separately
+_cid_slots = store.get_slots(st.session_state.cid)
+if st.session_state.get("_model_cid") != st.session_state.cid:
+    st.session_state.provider = _cid_slots.get("provider", st.session_state.provider)
+    for _k in ("ollama_model", "cloud_model", "cloud_base"):
+        if _cid_slots.get(_k):
+            st.session_state[_k] = _cid_slots[_k]
+    st.session_state._model_cid = st.session_state.cid
+    st.session_state.pop("last", None)
+    st.session_state.pop("last_evidence", None)
+    st.session_state.pop("last_followups", None)
+    st.session_state.pop("clarify", None)
 
 # ---------------- sidebar: conversations + settings ----------------
 with st.sidebar:
@@ -132,6 +145,35 @@ with st.sidebar:
         if st.button("Save title") and name:
             store.patch(st.session_state.cid, title=name)
             st.rerun()
+    if st.button("⑂ Fork with another model", use_container_width=True,
+                 help="Same release/platform/module slots, fresh history — pick a different model below and start work."):
+        src_slots = store.get_slots(st.session_state.cid)
+        new = store.create((store.get(st.session_state.cid) or {}).get("title", "") + " (fork)")
+        import json as _j2, sqlite3 as _s2
+        _c = _s2.connect("data/canonical/chat.db")
+        _c.execute("UPDATE conversations SET slots_json = ? WHERE id = ?",
+                   (_j2.dumps({k: v for k, v in src_slots.items()
+                               if k in ("releases", "platforms", "modules", "skip_clarify")}), new["id"]))
+        _c.commit()
+        _c.close()
+        st.session_state.cid = new["id"]
+        st.session_state._model_cid = ""
+        st.rerun()
+    with st.expander("💾 Session save / resume"):
+        st.caption("Portable save file: messages + slots + model. Resume here or on another machine — no re-ingest, no lost context.")
+        _bundle = store.export_bundle(st.session_state.cid)
+        st.download_button("⬇ Save session (.json)", json.dumps(_bundle or {}, indent=2),
+                           file_name="autosar_session.json", use_container_width=True)
+        _up = st.file_uploader("Resume a saved session", type=["json"], key="bundle_up")
+        if _up is not None and st.button("Load session"):
+            try:
+                _imp = store.import_bundle(json.loads(_up.read().decode()))
+                st.session_state.cid = _imp["id"]
+                st.session_state._model_cid = ""
+                st.success(f"Resumed {_imp['imported_messages']} messages.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Not a valid session file: {e}")
     st.divider()
     st.header("🤖 Model")
     st.session_state.provider = st.radio("Provider", ["ollama", "cloud"],
@@ -200,6 +242,16 @@ with st.sidebar:
 st.title("🚗 AUTOSAR Knowledge Copilot")
 conv = store.get(st.session_state.cid) or {"messages": [], "slots": {}}
 slots = conv.get("slots", {})
+
+# resume persisted working context (evidence/trace/follow-ups survive restarts)
+if "last" not in st.session_state:
+    _last_asst = next((m for m in reversed(conv.get("messages", []))
+                       if m["role"] == "assistant" and m.get("meta", {}).get("trace")), None)
+    _meta = (_last_asst or {}).get("meta", {})
+    st.session_state.last = {"trace": _meta.get("trace", {}), "llm": _meta.get("llm", ""),
+                             "plan": _meta.get("plan", {}), "graph": _meta.get("graph", [])}
+    st.session_state.last_evidence = _meta.get("evidence", [])
+    st.session_state.last_followups = _meta.get("followups", [])
 
 def _apply_clarify(text: str, slot: str = ""):
     """Fold a chip click / typed clarification reply into conversation slots, then re-ask."""
@@ -290,7 +342,10 @@ with tab_chat:
 
         def _pump():
             try:
-                for _ev in run_staged(_engine(), pending, spec, {}, known, top_k=depth_k):
+                _hist = [{"role": m["role"], "content": m["content"]}
+                         for m in conv.get("messages", [])]
+                for _ev in run_staged(_engine(), pending, spec, {}, known,
+                                      top_k=depth_k, history=_hist):
                     q.put(_ev)
             except Exception as e:  # never leave the UI spinning silently
                 q.put({"event": "status", "stage": "error", "message": str(e)[:300]})
@@ -350,8 +405,26 @@ with tab_chat:
                 st.caption("Interpreted as: " + "; ".join(
                     f"“{a}” → “{b}”" for a, b in
                     [(c.get("from", ""), c.get("to", "")) for c in plan["corrections"]]))
+            # persist model with the conversation: each chat keeps its own AI model
+            _cur_model = {"provider": st.session_state.get("provider", "ollama"),
+                          "ollama_model": st.session_state.get("ollama_model", ""),
+                          "cloud_model": st.session_state.get("cloud_model", ""),
+                          "cloud_base": st.session_state.get("cloud_base", "")}
+            import sqlite3 as _s3
+            _merged = store.get_slots(st.session_state.cid)
+            _merged.update({k: v for k, v in _cur_model.items() if v})
+            _c3 = _s3.connect("data/canonical/chat.db")
+            _c3.execute("UPDATE conversations SET slots_json = ? WHERE id = ?",
+                        (json.dumps(_merged), st.session_state.cid))
+            _c3.commit()
+            _c3.close()
             store.add_message(st.session_state.cid, "assistant", full,
-                              {"trace": (final_ev or {}).get("trace", {}), "llm": (final_ev or {}).get("llm", "")})
+                              {"trace": (final_ev or {}).get("trace", {}),
+                               "llm": (final_ev or {}).get("llm", ""),
+                               "plan": plan,
+                               "graph": (final_ev or {}).get("graph", []),
+                               "evidence": ev_cards,
+                               "followups": (final_ev or {}).get("followups", [])})
             st.session_state.last = final_ev or {}
             st.session_state.last_evidence = ev_cards
             st.session_state.last_followups = (final_ev or {}).get("followups", [])
