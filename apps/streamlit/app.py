@@ -68,7 +68,21 @@ from src.chat.store import ChatStore
 from src.ingestion.pipeline import run as run_ingest
 
 st.set_page_config(page_title="AUTOSAR Copilot", page_icon="🚗", layout="wide")
-asr_theme.inject()
+
+# ---------------- theme preference (dark/light, survives restarts) ----------------
+_UI_PREFS = ROOT / "data" / "canonical" / "ui_prefs.json"
+
+
+def _load_theme() -> str:
+    try:
+        return json.loads(_UI_PREFS.read_text(encoding="utf-8")).get("theme", "dark")
+    except Exception:
+        return "dark"
+
+
+if "theme" not in st.session_state:
+    st.session_state.theme = _load_theme()
+asr_theme.inject(st.session_state.theme)
 
 store = ChatStore()
 
@@ -131,6 +145,18 @@ if st.session_state.get("_model_cid") != st.session_state.cid:
 # ---------------- sidebar: conversations + settings ----------------
 with st.sidebar:
     asr_theme.brand()
+    _picked = st.radio("Appearance", ["🌙 Dark", "☀️ Light"], horizontal=True,
+        index=0 if st.session_state.theme == "dark" else 1,
+        label_visibility="collapsed", key="_theme_pick")
+    _mode = "light" if "Light" in _picked else "dark"
+    if _mode != st.session_state.theme:
+        st.session_state.theme = _mode
+        try:
+            _UI_PREFS.parent.mkdir(parents=True, exist_ok=True)
+            _UI_PREFS.write_text(json.dumps({"theme": _mode}), encoding="utf-8")
+        except Exception:
+            pass
+        st.rerun()
     st.header("💬 Conversations")
     if st.button("＋ New conversation", use_container_width=True):
         st.session_state.cid = store.create()["id"]
@@ -366,6 +392,7 @@ tab_chat, tab_ev, tab_trace, tab_graph, tab_src, tab_arxml, tab_tokens = st.tabs
 with tab_chat:
     for i, m in enumerate(conv.get("messages", [])):
         with st.chat_message(m["role"]):
+            asr_theme.role_ribbon(m["role"], m.get("meta") if isinstance(m.get("meta"), dict) else {})
             if m["role"] == "assistant":
                 body, src = _split_sources(m["content"])
                 st.markdown(body)
