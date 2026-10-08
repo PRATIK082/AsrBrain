@@ -162,14 +162,14 @@ def brand() -> None:
     st.markdown(
         f'<div class="asr-brand">{_LOGO_SVG}'
         '<div><div class="asr-name">AsrBrain</div>'
-        '<div class="asr-sub">AUTOSAR COPILOT · V2</div></div></div>',
+        '<div class="asr-sub">AUTOMOTIVE INTELLIGENCE · V2</div></div></div>',
         unsafe_allow_html=True,
     )
 
 
 def hero(scope: str, files: int) -> None:
     st.markdown(
-        '<div class="asr-hero"><h1>AUTOSAR Copilot, <span>engineered.</span></h1>'
+        '<div class="asr-hero"><h1>AsrBrain, <span>engineered.</span></h1>'
         '<p>Ask about specs, ARXML topologies, code and migrations — every claim cited.</p>'
         f'<div class="asr-chips"><span class="asr-chip">SCOPE · {scope}</span>'
         f'<span class="asr-chip">PROJECT FILES · {files}</span>'

@@ -22,7 +22,7 @@ Date: 2026-09-30. Scope: current repo before Chatbox/multimodal upgrade. No prod
 ## Gaps vs. target (Parts B–O)
 
 1. No conversational slot-filling: release/platform filters are sidebar dropdowns; empty = unfiltered (silent version mixing risk). No ask-back, no module confirm/change, no doctype auto-routing surfaced.
-2. Search-mode radio is non-standard (ChatGPT/Copilot/Gemini auto-detect intent). Intent is detected but exposed as a manual mode switch.
+2. Search-mode radio is non-standard (ChatGPT/Gemini auto-detect intent). Intent is detected but exposed as a manual mode switch.
 3. Provider lock-in: Ollama only; no cloud (OpenAI/Gemini/Opencode) path, no API-key handling.
 4. UI is form-submit Q&A, not Chatbox-like: no sidebar conversations, history, streaming, regenerate/edit/stop, citation chips, page preview, upload/drag-drop.
 5. No multimodal records (tables/figures/diagrams/equations/images/OCR), no parser adapters, no modality indexes, no SSE chat contract, no React frontend.

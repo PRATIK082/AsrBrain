@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'AsrBrain — AUTOSAR Knowledge Copilot',
+  title: 'AsrBrain — Automotive Intelligence',
   description: 'Citation-grounded AUTOSAR Classic/Adaptive engineering assistant',
 };
 

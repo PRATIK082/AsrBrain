@@ -1,4 +1,4 @@
-# AUTOSAR Knowledge Copilot
+# AsrBrain — Automotive Intelligence
 
 Local-first, citation-grounded RAG for AUTOSAR Classic / Adaptive / Foundation specifications.
 Chatbox-style chat UI (no filter forms to fill): the assistant asks back for a missing
@@ -30,7 +30,7 @@ There is deliberately no release/platform/module sidebar. Flow:
    applies only after you confirm or when you named it yourself.
 4. Document type (SWS/PRS/RS/…) is always routed automatically and shown in the trace.
 
-Search mode is automatic too (ChatGPT/Copilot/Gemini-style): the detected intent is shown as
+Search mode is automatic too (ChatGPT/Gemini-style): the detected intent is shown as
 `Mode: troubleshooting (auto)` with per-mode answer formats (comparison tables, diagnostic
 sequences, configuration procedures). The view auto-follows new messages; long source lists
 collapse into one `📚 Sources (n)` expander; every answer ends with 3–4 clickable follow-up

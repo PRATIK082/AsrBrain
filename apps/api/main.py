@@ -23,7 +23,7 @@ from src.chat.store import ChatStore
 from src.ingestion.pipeline import run as run_ingest
 from src.evaluation.datasets import write_seed
 
-app = FastAPI(title="AUTOSAR Knowledge Copilot API")
+app = FastAPI(title="AsrBrain API")
 
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()

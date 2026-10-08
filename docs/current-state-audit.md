@@ -1,4 +1,4 @@
-# Current-State Audit — AUTOSAR Knowledge Copilot (repo: RAG_LLM)
+# Current-State Audit — AsrBrain (repo: RAG_LLM)
 
 Date: 2026-09-29. Method: static read of all 6 Python files + live inspection of `docling_rag.db` (53 chunks) and `pdf/AUTOSAR_FO_PRS_SOMEIPProtocol.pdf` (92 pages, 1.56 MB). No code modified.
 

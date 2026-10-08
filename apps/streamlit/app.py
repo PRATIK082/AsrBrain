@@ -1,4 +1,4 @@
-"""Chatbox-like AUTOSAR copilot (ChatGPT-style). Self-contained Streamlit fallback:
+"""AsrBrain chat (ChatGPT-style). Self-contained Streamlit fallback:
 talks to the same src/ engine in-process (no API server required).
 
 - No corpus-filter sidebar: release/platform asked back only when missing,
@@ -67,7 +67,7 @@ from src.generation.providers import ProviderSpec, list_ollama_models
 from src.chat.store import ChatStore
 from src.ingestion.pipeline import run as run_ingest
 
-st.set_page_config(page_title="AUTOSAR Copilot", page_icon="🚗", layout="wide")
+st.set_page_config(page_title="AsrBrain — Automotive Intelligence", page_icon="🚗", layout="wide")
 
 # ---------------- theme preference (dark/light, survives restarts) ----------------
 _UI_PREFS = ROOT / "data" / "canonical" / "ui_prefs.json"
@@ -344,7 +344,7 @@ if not conv.get("messages"):
         st.session_state.pending = _chosen
         st.rerun()
 else:
-    st.markdown("### 🚗 AUTOSAR Knowledge Copilot")
+    st.markdown("### 🚗 AsrBrain Automotive Intelligence")
 slots = conv.get("slots", {})
 
 # resume persisted working context (evidence/trace/follow-ups survive restarts)
