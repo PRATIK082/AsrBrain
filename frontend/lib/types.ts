@@ -24,3 +24,12 @@ export type StreamEvent =
   | { event: "complete"; answer: string; confidence: number; level: string; citation_coverage: number; followups?: string[]; trace: Record<string, unknown>; graph: unknown[] };
 
 export interface Conversation { id: string; title: string; updated_at: number }
+
+export interface ArxmlNode { id: string; type: string; label: string; xpath?: string }
+export interface ArxmlEdge { src: string; rel: string; dst: string; is_inferred?: boolean }
+export interface CodeFinding { rule: string; level: string; location: string; message: string; provenance: string }
+export interface DiffItem {
+  domain: string; entity_key: string; change_type: string; severity: string;
+  base_value?: unknown; target_value?: unknown;
+  compatibility_risk: string; migration_action?: string | null;
+}

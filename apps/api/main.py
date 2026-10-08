@@ -509,3 +509,33 @@ def api_code_analyze(req: CodeReviewRequest):
     return {"findings": [f.model_dump() for f in findings], "rte_calls": calls,
             "traceability": [lnk.model_dump() for lnk in links],
             "disclaimer": "Advisory only — not a MISRA/ISO 26262 compliance determination."}
+
+
+class SarifRequest(BaseModel):
+    sarif: dict
+    tool: str = ""
+
+
+@app.post("/api/code/sarif")
+def api_code_sarif(req: SarifRequest):
+    if not settings.code_intel_enabled:
+        raise HTTPException(503, "code intelligence disabled by feature flag")
+    from src.code_intelligence import ingest_sarif
+    findings = ingest_sarif(req.sarif, req.tool)
+    return {"findings": [f.model_dump() for f in findings],
+            "disclaimer": "Tool-reported findings ingested verbatim — not a compliance determination."}
+
+
+class DiagramRequest(BaseModel):
+    image_path: str
+    caption: str = ""
+    page: int = 0
+    document_id: str = ""
+
+
+@app.post("/api/diagrams/analyze")
+def api_diagram_analyze(req: DiagramRequest):
+    from src.ingestion.vlm import analyze_diagram
+    ev = analyze_diagram(req.image_path, req.caption, page=req.page, document_id=req.document_id)
+    return {**ev.model_dump(),
+            "note": "Supplemental only — cite the original figure for normative claims; processed locally."}

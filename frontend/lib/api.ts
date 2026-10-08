@@ -17,6 +17,20 @@ export const api = {
     json("/api/feedback", { method: "POST", body: JSON.stringify({ conversation_id, message_idx, rating, note }) }),
   models: () => json("/api/models"),
   releases: () => json("/api/releases"),
+  policies: () => json("/api/policies/effective"),
+  arxmlArtifacts: (tenant = "default") => json(`/api/arxml/artifacts?tenant=${tenant}`),
+  arxmlTopology: (artifact_id: string, tenant = "default") =>
+    json(`/api/arxml/topology?artifact_id=${artifact_id}&tenant=${tenant}`),
+  arxmlNeighbors: (node_id: string, artifact_id: string, tenant = "default") =>
+    json(`/api/arxml/nodes/${encodeURIComponent(node_id)}/neighbors?artifact_id=${artifact_id}&tenant=${tenant}`),
+  diff: (base: object[], target: object[], domain = "api") =>
+    json("/api/diff", { method: "POST", body: JSON.stringify({ base, target, domain }) }),
+  codeAnalyze: (source: string, path = "input.c", port_names: string[] = []) =>
+    json("/api/code/analyze", { method: "POST", body: JSON.stringify({ source, path, port_names }) }),
+  sarifUpload: (sarif: object) =>
+    json("/api/code/sarif", { method: "POST", body: JSON.stringify({ sarif }) }),
+  diagramAnalyze: (image_path: string, caption = "", page = 0, document_id = "") =>
+    json("/api/diagrams/analyze", { method: "POST", body: JSON.stringify({ image_path, caption, page, document_id }) }),
 };
 
 /** SSE reader for POST /api/chat/stream — yields parsed StreamEvents. */
