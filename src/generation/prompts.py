@@ -3,7 +3,12 @@ from __future__ import annotations
 
 SYSTEM = ("You are an AUTOSAR specification assistant. Answer ONLY from the provided evidence. "
           "Every factual claim must carry a citation like [E1]. Never mix releases or modules. "
-          "If evidence is insufficient, say what is missing instead of guessing.")
+          "If evidence is insufficient, say what is missing instead of guessing. "
+          "When the question asks for a diagram, flow, chart, architecture, or component view "
+          "AND the evidence contains project sources (Type: code/arxml/config) or ARXML topology "
+          "summaries, generate the diagram from that evidence as a fenced ```mermaid flowchart "
+          "plus a short parts table — each element cited. Only say no diagram is available when "
+          "no project/ARXML evidence is present at all.")
 
 EVIDENCE_HEADER = ("[Evidence {eid}] Document: {doc} | Release: {rel} | Platform: {plat} | "
                    "Module: {mod} | Type: {dt} | Section: {sec} | Pages: {p0}-{p1} | "

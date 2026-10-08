@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import json
+import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -52,7 +53,7 @@ def _compact_sources(src: str) -> list[str]:
                      f"{(sec.group(1).strip() if sec else '').strip() or '—'}")
     return lines
 
-from src.config.settings import settings
+from src.config.settings import settings, TOKEN_CAPS
 from src.indexing.hybrid import HybridIndex, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.stages import run_staged
@@ -196,10 +197,17 @@ with st.sidebar:
     st.subheader("Answer speed / depth")
     depth = st.radio("Evidence depth", ["Eco (4)", "Balanced (8)", "Deep (12)"], index=1,
                      help="Fewer passages = faster answers on CPU. Retrieval breadth is unchanged.")
-    st.session_state.depth = {"Eco (4)": 4, "Balanced (8)": 8, "Deep (12)": 12}[depth]
+    st.session_state.depth = {"Eco (4)": TOKEN_CAPS.get("eco", 4),
+                              "Balanced (8)": TOKEN_CAPS.get("balanced", 8),
+                              "Deep (12)": TOKEN_CAPS.get("deep", 12)}[depth]
     length = st.radio("Response length", ["Concise", "Standard", "Detailed"], index=0,
-                      help="Caps generated tokens: Concise ≈ 1–2 min on CPU, Detailed slower.")
-    st.session_state.num_predict = {"Concise": 400, "Standard": 600, "Detailed": 1200}[length]
+                      help=f"Token caps from config/generation.yaml: "
+                           f"{TOKEN_CAPS.get('concise', 400)}/"
+                           f"{TOKEN_CAPS.get('standard', 600)}/"
+                           f"{TOKEN_CAPS.get('detailed', 1200)}. Edit the file or the Token Config tab to change.")
+    st.session_state.num_predict = {"Concise": TOKEN_CAPS.get("concise", 400),
+                                    "Standard": TOKEN_CAPS.get("standard", 600),
+                                    "Detailed": TOKEN_CAPS.get("detailed", 1200)}[length]
     with st.expander("Advanced overrides (optional)"):
         st.caption("Normally unnecessary: release/platform are asked back when missing, module auto-detected, document type automatic.")
         adv_rel = st.text_input("Force release (blank = auto)")
@@ -207,6 +215,23 @@ with st.sidebar:
         adv_mod = st.text_input("Force module (blank = auto-detect)")
         skip_cl = st.checkbox("Answer generally without asking back", False)
         st.session_state.adv = {"rel": adv_rel, "plat": adv_plat, "mod": adv_mod, "skip": skip_cl}
+    st.divider()
+    st.header("🏷 Project scope")
+    st.caption("Scopes every linked source below. Chat grounds answers in these files.")
+    if "scope_type" not in st.session_state:
+        st.session_state.scope_type = "project"
+    if "scope_name" not in st.session_state:
+        st.session_state.scope_name = "default"
+    st.session_state.scope_type = st.selectbox(
+        "Scope", ["project", "oem", "open_program", "customer", "customer_project", "generic"],
+        index=["project", "oem", "open_program", "customer", "customer_project", "generic"].index(
+            st.session_state.scope_type),
+        help="project = your ECU project · oem = OEM-specific · open_program = open-source program · "
+             "customer / customer_project = customer-specific · generic = reusable / common")
+    st.session_state.scope_name = st.text_input("Scope name", st.session_state.scope_name,
+        help="e.g. MyECU, Bosch, AUTOSAR-Open, CustomerX, CustomerX-BrakeECU, Common")
+    st.session_state.tenant_id = st.text_input("Tenant", st.session_state.get("tenant_id", "default"))
+    st.session_state.project_id = st.text_input("Project", st.session_state.get("project_id", "default"))
     st.divider()
     st.header("📄 Documents")
     up = st.file_uploader("Upload AUTOSAR PDF", type=["pdf"])
@@ -233,6 +258,38 @@ with st.sidebar:
             st.success(f"Ingested {up.name} in {int(_t.time()-t0)}s — {res.get('documents', '?')} doc(s) indexed.")
         except Exception as e:
             st.error(f"Ingest failed: {e}")
+    st.caption("Link project files (ARXML / configs / C-C++-Python code) so chat can answer from them:")
+    proj_files = st.file_uploader("ARXML / config / code files", type=["arxml", "xml", "c", "h", "cpp", "hpp",
+        "py", "json", "yaml", "yml", "toml", "ini", "cfg", "dbc", "txt", "md"],
+        accept_multiple_files=True, key="proj_up")
+    if proj_files and st.button("Link + index project files"):
+        try:
+            from src.ingestion import project_sources as _ps
+            import time as _t2
+            dest_dir = os.path.join("data", "sources", "uploads",
+                                    st.session_state.get("scope_type", "project"),
+                                    st.session_state.get("scope_name", "default"))
+            os.makedirs(dest_dir, exist_ok=True)
+            for pf in proj_files:
+                with open(os.path.join(dest_dir, pf.name), "wb") as f:
+                    f.write(pf.getbuffer())
+            kind = "arxml" if all(n.name.lower().endswith((".arxml", ".xml")) for n in proj_files) else "mixed"
+            rec = _ps.register_source(
+                f"upload-{st.session_state.get('scope_name', 'default')}", dest_dir, kind=kind,
+                scope_type=st.session_state.get("scope_type", "project"),
+                scope_name=st.session_state.get("scope_name", "default"),
+                tenant_id=st.session_state.get("tenant_id", "default"),
+                project_id=st.session_state.get("project_id", "default"))
+            res = _ps.ingest_source(rec["source_id"], settings.canonical_db)
+            chunks = load_chunks(settings.canonical_db)
+            idx = HybridIndex()
+            idx.build(chunks)
+            idx.save("data/indexes/hybrid")
+            _engine.clear()
+            st.success(f"Indexed {res['files']} file(s) → {res['chunks']} chunks "
+                       f"under [{rec['scope_type']}:{rec['scope_name']}]. Ask about them in Chat.")
+        except Exception as e:
+            st.error(f"Project ingest failed: {e}")
     conv_now = store.get(st.session_state.cid) or {"messages": []}
     md_now = "\n\n---\n\n".join(f"**{m['role']}**:\n\n{m['content']}" for m in conv_now["messages"])
     st.download_button("⬇ Export conversation (.md)", md_now or "No messages yet.",
@@ -283,7 +340,8 @@ def _apply_clarify(text: str, slot: str = ""):
     st.rerun()
 
 
-tab_chat, tab_ev, tab_trace, tab_graph = st.tabs(["Chat", "Evidence", "Trace", "Graph"])
+tab_chat, tab_ev, tab_trace, tab_graph, tab_src, tab_arxml, tab_tokens = st.tabs(
+    ["Chat", "Evidence", "Trace", "Graph", "Project Sources", "ARXML & Code", "Token Config"])
 with tab_chat:
     for i, m in enumerate(conv.get("messages", [])):
         with st.chat_message(m["role"]):
@@ -493,3 +551,119 @@ with tab_graph:
             st.markdown(f"`{e['subject']} → {e['object']}` *{e['predicate']}*{flag} — {e.get('source_pdf','')} p.{e.get('page')}")
     else:
         st.caption("Module/API relationship edges with source links appear here.")
+
+with tab_src:
+    st.subheader("🔗 Project sources — local folder or Git server link")
+    st.caption("Link once, chat grounds answers in these files. Scope tags keep OEM / customer / "
+               "project files separated.")
+    from src.ingestion import project_sources as _ps2
+    with st.form("link_source"):
+        c1, c2 = st.columns(2)
+        sname = c1.text_input("Source name", placeholder="BrakeECU-SWC, VendorCanStack…")
+        skind = c2.selectbox("Content", ["mixed", "arxml", "config", "code"])
+        c3, c4 = st.columns(2)
+        local_dir = c3.text_input("Local PC folder or file", placeholder=r"C:\work\ecu\swc  (or \\server\share\ecu)")
+        git_url = c4.text_input("Server Git link", placeholder="https://git.company.com/ecu/swc.git")
+        go = st.form_submit_button("Link + index source")
+    if go:
+        loc = git_url.strip() or local_dir.strip()
+        if not sname or not loc:
+            st.error("Give the source a name AND a local folder/file or a Git link.")
+        else:
+            try:
+                with st.spinner("Linking + indexing (Git clone on first link, incremental after)…"):
+                    rec = _ps2.register_source(
+                        sname, loc, kind=skind,
+                        scope_type=st.session_state.get("scope_type", "project"),
+                        scope_name=st.session_state.get("scope_name", "default"),
+                        tenant_id=st.session_state.get("tenant_id", "default"),
+                        project_id=st.session_state.get("project_id", "default"))
+                    res = _ps2.ingest_source(rec["source_id"], settings.canonical_db)
+                    chunks = load_chunks(settings.canonical_db)
+                    idx = HybridIndex()
+                    idx.build(chunks)
+                    idx.save("data/indexes/hybrid")
+                    _engine.clear()
+                st.success(f"Linked **{sname}** [{rec['scope_type']}:{rec['scope_name']}] — "
+                           f"{res['files']} files → {res['chunks']} chunks. Ask about it in Chat.")
+            except Exception as e:
+                st.error(f"Link failed: {e}")
+    st.divider()
+    st.subheader("Linked sources")
+    for r in _ps2.load_registry():
+        cols = st.columns([4, 3, 1])
+        cols[0].markdown(f"**{r['name']}** `[{r['scope_type']}:{r['scope_name']}]` "
+                         f"({r.get('kind')}) — {r.get('files_indexed', 0)} files / "
+                         f"{r.get('chunks_indexed', 0)} chunks")
+        cols[1].caption(r.get("local_path", r.get("location", ""))[:80])
+        if cols[2].button("Re-index", key=f"reidx_{r['source_id']}"):
+            try:
+                with st.spinner("Re-indexing…"):
+                    res = _ps2.ingest_source(r["source_id"], settings.canonical_db)
+                    chunks = load_chunks(settings.canonical_db)
+                    idx = HybridIndex()
+                    idx.build(chunks)
+                    idx.save("data/indexes/hybrid")
+                    _engine.clear()
+                st.success(f"Re-indexed: {res['chunks']} chunks.")
+            except Exception as e:
+                st.error(f"Re-index failed: {e}")
+
+with tab_arxml:
+    st.subheader("⚙ ARXML & code evidence actually indexed")
+    st.caption("Deterministic parse first — chat explains from this, never from prose guesses.")
+    from src.ingestion import project_sources as _ps3
+    rows = _ps3.load_registry()
+    arxml_rows = [r for r in rows if r.get("kind") in ("arxml", "mixed")]
+    if not arxml_rows:
+        st.info("No ARXML/config/code sources linked yet — use Project Sources or the sidebar uploader.")
+    for r in arxml_rows:
+        with st.expander(f"{r['name']} [{r['scope_type']}:{r['scope_name']}]", expanded=False):
+            st.caption(r.get("local_path", ""))
+            try:
+                from src.ingestion.arxml.parser import parse_arxml as _parse
+                shown = 0
+                for root, _d, files in os.walk(r["local_path"] if os.path.isdir(r["local_path"]) else "."):
+                    for fn in sorted(files):
+                        if not fn.lower().endswith((".arxml", ".xml")) or shown >= 3:
+                            continue
+                        fp = os.path.join(root, fn)
+                        try:
+                            with open(fp, encoding="utf-8", errors="replace") as f:
+                                topo = _parse(f.read(300_000), artifact_id=fn).get("topology", {})
+                            swcs = [s.get("name") for s in topo.get("software_components", [])[:15]]
+                            st.markdown(f"`{fn}` — SWCs: {', '.join(swcs) or '—'} · "
+                                        f"connectors: {len(topo.get('connectors', []))} · "
+                                        f"unresolved: {len(topo.get('unresolved_refs', []))}")
+                            shown += 1
+                        except Exception as e:
+                            st.caption(f"{fn}: parse note — {e}")
+                    if shown:
+                        break
+            except Exception as e:
+                st.caption(f"Topology preview unavailable: {e}")
+
+with tab_tokens:
+    st.subheader("🎚 Token caps — edit without touching code")
+    st.caption("Stored in `config/generation.yaml`. Sidebar presets (Concise/Standard/Detailed) read these values.")
+    import os as _os2
+    cfg_path = _os2.path.join(str(ROOT), "config", "generation.yaml")
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raw = ""
+    edited = st.text_area("config/generation.yaml", raw, height=300, key="tok_cfg")
+    c1, c2 = st.columns(2)
+    if c1.button("Save token config"):
+        try:
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                f.write(edited)
+            from src.config import settings as _smod
+            _smod.TOKEN_CAPS.update(_smod._load_token_caps())
+            st.success("Saved. New chat turns use the updated caps (sidebar shows the numbers).")
+        except Exception as e:
+            st.error(f"Save failed: {e}")
+    if c2.button("Reload defaults into editor"):
+        st.session_state.tok_cfg = raw
+        st.rerun()

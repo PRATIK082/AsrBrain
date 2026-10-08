@@ -1,7 +1,7 @@
 """Ollama + cloud generation with deterministic fallback (works without any LLM)."""
 from __future__ import annotations
 import httpx
-from ..config.settings import settings
+from ..config.settings import settings, TOKEN_CAPS
 from .prompts import build_prompt
 from .providers import ProviderSpec, complete as _provider_complete
 
@@ -76,9 +76,9 @@ def _generate_ollama(query: str, evidence: list[dict], comparison: bool = False,
     prompt = build_prompt(query, evidence, comparison, intent)
     try:
         r = httpx.post(f"{settings.ollama_base_url}/api/generate",
-                       json={"model": model, "prompt": prompt, "stream": False,
-                             "options": {"temperature": 0.2, "num_ctx": 8192, "top_p": 0.9,
-                                         "num_predict": settings.llm_num_predict}},
+                        json={"model": model, "prompt": prompt, "stream": False,
+                              "options": {"temperature": 0.2, "num_ctx": TOKEN_CAPS.get("num_ctx", 8192), "top_p": 0.9,
+                                          "num_predict": settings.llm_num_predict}},
                        timeout=settings.ollama_timeout_s)
         if r.status_code == 200:
             return {"draft": r.json().get("response", ""), "llm": model}

@@ -539,3 +539,54 @@ def api_diagram_analyze(req: DiagramRequest):
     ev = analyze_diagram(req.image_path, req.caption, page=req.page, document_id=req.document_id)
     return {**ev.model_dump(),
             "note": "Supplemental only — cite the original figure for normative claims; processed locally."}
+
+
+class SourceRegisterRequest(BaseModel):
+    name: str
+    location: str  # local PC folder/file or server Git link
+    kind: str = "mixed"
+    scope_type: str = "project"
+    scope_name: str = "default"
+    tenant_id: str = "default"
+    project_id: str = "default"
+    workspace_id: str = "default"
+
+
+@app.get("/api/sources")
+def api_sources_list():
+    from src.ingestion import project_sources as _ps
+    return {"sources": _ps.load_registry(),
+            "scope_types": list(_ps.SCOPE_TYPES)}
+
+
+@app.post("/api/sources/register")
+def api_sources_register(req: SourceRegisterRequest):
+    from src.ingestion import project_sources as _ps
+    try:
+        rec = _ps.register_source(req.name, req.location, kind=req.kind,
+                                  scope_type=req.scope_type, scope_name=req.scope_name,
+                                  tenant_id=req.tenant_id, project_id=req.project_id,
+                                  workspace_id=req.workspace_id)
+        res = _ps.ingest_source(rec["source_id"], settings.canonical_db)
+        return {**rec, **res, "status": "indexed"}
+    except (ValueError, FileNotFoundError, KeyError) as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"ingest failed: {e}")
+
+
+@app.post("/api/sources/{source_id}/reindex")
+def api_sources_reindex(source_id: str):
+    from src.ingestion import project_sources as _ps
+    try:
+        return {**_ps.ingest_source(source_id, settings.canonical_db), "status": "indexed"}
+    except KeyError:
+        raise HTTPException(404, "unknown source")
+    except Exception as e:
+        raise HTTPException(500, f"reindex failed: {e}")
+
+
+@app.get("/api/config/tokens")
+def api_tokens_get():
+    from src.config.settings import TOKEN_CAPS
+    return {"caps": dict(TOKEN_CAPS), "file": "config/generation.yaml"}

@@ -8,6 +8,41 @@ def _get(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _load_token_caps() -> dict:
+    """User-editable caps from config/generation.yaml; env LLM_NUM_PREDICT wins."""
+    caps = {"concise": 400, "standard": 600, "detailed": 1200,
+            "num_ctx": 8192, "eco": 4, "balanced": 8, "deep": 12}
+    try:
+        import os as _os
+        root = _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))
+        cfg = _os.path.join(root, "config", "generation.yaml")
+        if _os.path.exists(cfg):
+            cur: dict | None = None
+            with open(cfg, encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if s.startswith("concise:"):
+                        caps["concise"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("standard:"):
+                        caps["standard"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("detailed:"):
+                        caps["detailed"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("num_ctx:"):
+                        caps["num_ctx"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("eco:"):
+                        caps["eco"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("balanced:"):
+                        caps["balanced"] = int(s.split(":")[1].split("#")[0])
+                    elif s.startswith("deep:"):
+                        caps["deep"] = int(s.split(":")[1].split("#")[0])
+    except Exception:
+        pass
+    return caps
+
+
+TOKEN_CAPS = _load_token_caps()
+
+
 @dataclass
 class Settings:
     llm_model: str = field(default_factory=lambda: _get("LLM_MODEL", "qwen3:14b"))
@@ -16,7 +51,7 @@ class Settings:
     reranker_model: str = field(default_factory=lambda: _get("RERANKER_MODEL", "none"))
     ollama_base_url: str = field(default_factory=lambda: _get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
     ollama_timeout_s: float = field(default_factory=lambda: float(_get("OLLAMA_TIMEOUT_S", "180")))
-    llm_num_predict: int = field(default_factory=lambda: int(_get("LLM_NUM_PREDICT", "600")))
+    llm_num_predict: int = field(default_factory=lambda: int(_get("LLM_NUM_PREDICT", str(TOKEN_CAPS.get("standard", 600)))))
     topk_bm25: int = field(default_factory=lambda: int(_get("TOPK_BM25", "50")))
     topk_dense: int = field(default_factory=lambda: int(_get("TOPK_DENSE", "50")))
     fusion_pool: int = field(default_factory=lambda: int(_get("FUSION_POOL", "100")))
