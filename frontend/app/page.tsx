@@ -1,70 +1,116 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { api, streamChat, type StreamEvent } from "../lib/api";
+import { api } from "../lib/api";
 import type { CodeFinding, DiffItem } from "../lib/types";
+import { useAsrBrainStore } from "../store/useAsrBrainStore";
+import { useSettings } from "../stores/settings-store";
+import { useAsrStream } from "../hooks/useAsrStream";
+import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
+import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
 
-interface Msg { role: "user" | "assistant"; content: string }
 type Tab = "chat" | "arxml" | "diff" | "code";
 
 function ChatPane() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [status, setStatus] = useState("");
-  const [convId, setConvId] = useState("");
-  const [ctrl, setCtrl] = useState<AbortController | null>(null);
+  const [convId] = useState("");
   const [processing, setProcessing] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const model = useSettings((s) => s.model || "ollama");
+  const sessions = useAsrBrainStore((s) => s.sessions);
+  const activeSessionId = useAsrBrainStore((s) => s.activeSessionId);
+  const initiateSession = useAsrBrainStore((s) => s.initiateSession);
+  const forkWorkspace = useAsrBrainStore((s) => s.forkWorkspace);
+  const exportSessionBundle = useAsrBrainStore((s) => s.exportSessionBundle);
+  const importSessionBundle = useAsrBrainStore((s) => s.importSessionBundle);
+  const {
+    executeStream, abortStream, isStreaming,
+    currentStages, currentEvidence, streamedResponse, verdict,
+  } = useAsrStream();
+
+  useEffect(() => {
+    if (!activeSessionId) initiateSession(model);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const session = activeSessionId ? sessions[activeSessionId] : undefined;
+  const messages = session?.messages ?? [];
 
   async function send() {
-    if (!input.trim()) return;
+    if (!input.trim() || !activeSessionId || isStreaming) return;
     const text = input;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    const ac = new AbortController();
-    setCtrl(ac);
-    let acc = "";
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
-    try {
-      const gen = streamChat({ conversation_id: convId || undefined, message: text }, ac.signal);
-      for await (const ev: StreamEvent of gen) {
-        if (ev.event === "status") {
-          setStatus(`${ev.stage}: ${ev.message}`);
-          if (ev.stage === "policy" || ev.stage === "routing") setProcessing(ev.message);
-        } else if (ev.event === "token") {
-          acc += ev.text;
-          setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: acc }; return c; });
-        } else if (ev.event === "clarify") {
-          setMessages((m) => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: ev.question }; return c; });
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") setStatus(String(e));
-    } finally {
-      setStatus("");
-      setCtrl(null);
-    }
+    setStatus("");
+    setProcessing("");
+    await executeStream(activeSessionId, text, { conversationId: convId || undefined });
+  }
+
+  function downloadBundle() {
+    if (!activeSessionId) return;
+    const blob = new Blob([exportSessionBundle(activeSessionId)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "asrbrain_session.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function importBundle(f: File) {
+    const ok = importSessionBundle(await f.text());
+    setStatus(ok ? "Session bundle imported." : "Not a valid session bundle.");
   }
 
   return (
-    <section className="flex flex-1 flex-col">
-      {processing && <p className="bg-gray-100 px-4 py-1 text-xs">Routing: {processing}</p>}
+    <section className="flex flex-1 flex-col bg-[#070A0F] text-[#F1F5F9]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#222D3F] bg-[#121824] px-4 py-2 text-xs">
+        <span className="font-mono text-[#F1F5F9]/60">
+          {session?.title ?? "…"} · model {session?.model ?? model}
+          {session?.moduleSlot ? ` · ${session.moduleSlot}` : ""}
+          {session?.releaseSlot ? ` · ${session.releaseSlot}` : ""}
+        </span>
+        <span className="flex-1" />
+        <button className="rounded border border-[#222D3F] px-2 py-1 hover:border-[#00F5FF]/60"
+          onClick={() => initiateSession(model)}>＋ New</button>
+        <button className="rounded border border-[#222D3F] px-2 py-1 hover:border-[#00F5FF]/60"
+          onClick={() => activeSessionId && forkWorkspace(activeSessionId, model)}>⑂ Fork</button>
+        <button className="rounded border border-[#222D3F] px-2 py-1 hover:border-[#00F5FF]/60"
+          onClick={downloadBundle}>⬇ Export</button>
+        <button className="rounded border border-[#222D3F] px-2 py-1 hover:border-[#00F5FF]/60"
+          onClick={() => fileRef.current?.click()}>⬆ Import</button>
+        <input ref={fileRef} type="file" accept=".json" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void importBundle(f); e.target.value = ""; }} />
+      </div>
+      {processing && <p className="bg-[#121824] px-4 py-1 font-mono text-xs text-[#00F5FF]">Routing: {processing}</p>}
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-            <div className="inline-block max-w-3xl rounded border p-3 text-left">
+        {currentStages.length > 0 && <PipelineTelemetry stages={currentStages} />}
+        {messages.map((m) => (
+          <div key={m.id} className={m.role === "user" ? "text-right" : "text-left"}>
+            <div className={`inline-block max-w-3xl rounded border p-3 text-left ${
+              m.role === "user" ? "border-[#222D3F] bg-[#121824]" : "border-[#222D3F] bg-[#0D1320]"}`}>
               <ReactMarkdown>{m.content}</ReactMarkdown>
             </div>
           </div>
         ))}
-        {status && <p className="text-sm text-gray-500">{status}</p>}
+        {isStreaming && streamedResponse && (
+          <div className="text-left">
+            <div className="inline-block max-w-3xl rounded border border-[#00F5FF]/30 bg-[#0D1320] p-3 text-left">
+              <ReactMarkdown>{streamedResponse}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+        {currentEvidence.length > 0 && <AsrCitationDrawer sources={currentEvidence} verdict={verdict} />}
+        {status && <p className="font-mono text-sm text-[#F59E0B]">{status}</p>}
       </div>
-      <div className="flex gap-2 border-t p-4">
-        <input className="flex-1 rounded border p-2" value={input}
+      <div className="flex gap-2 border-t border-[#222D3F] bg-[#121824] p-4">
+        <input className="flex-1 rounded border border-[#222D3F] bg-[#070A0F] p-2 text-[#F1F5F9] placeholder:text-[#F1F5F9]/30"
+          value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Ask about AUTOSAR…" />
-        <button className="rounded bg-black px-4 py-2 text-white" onClick={send}>Send</button>
-        {ctrl && <button className="rounded border px-4 py-2" onClick={() => { ctrl.abort(); api.stop(convId); }}>Stop</button>}
+          onKeyDown={(e) => e.key === "Enter" && void send()}
+          placeholder="Ask about AUTOSAR… (release/platform asked back only if missing)" />
+        <button className="rounded bg-[#00F5FF] px-4 py-2 font-semibold text-black" onClick={() => void send()}>Send</button>
+        {isStreaming && <button className="rounded border border-[#222D3F] px-4 py-2" onClick={abortStream}>Stop</button>}
       </div>
     </section>
   );
