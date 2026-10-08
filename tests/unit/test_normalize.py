@@ -27,3 +27,25 @@ def test_protected_identifiers_untouched():
 def test_requirement_id_untouched():
     fixed, _ = correct_query("What does PRS_SOMEIP_00043 specify?")
     assert "PRS_SOMEIP_00043" in fixed
+
+
+def test_diag_shorthand_expands():
+    fixed, changes = correct_query("derive diag DTC element")
+    assert "diagnostic" in fixed
+    assert any(a == "diag" for a, _ in changes)
+
+
+def test_user_typo_sentence_fixed():
+    fixed, changes = correct_query(
+        "what alla re the element requared for configuration and hot to map "
+        "and provide deatiled proparty")
+    for w in ("all", "required", "configuration", "how", "map",
+              "detailed", "property"):
+        assert w in fixed, w
+    assert len(changes) >= 5
+
+
+def test_api_names_never_rewritten_by_maps():
+    fixed, changes = correct_query("How does Rte_Init behave?")
+    assert "Rte_Init" in fixed
+    assert not any("Rte_Init" in a for a, _ in changes)

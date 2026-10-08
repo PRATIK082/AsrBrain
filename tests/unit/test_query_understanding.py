@@ -52,3 +52,12 @@ def test_initialization_sequences_are_explanations():
     p = parse("Explain CanIf initialization sequence")
     assert p.intent == "deep_explanation"
     assert "CanIf" in p.modules
+
+
+def test_typo_ridden_diag_question_routes_to_diagnostics():
+    p = parse("derive diag DTC element and what alla re the element required "
+              "for configuration and hot to map and provide detailed property "
+              "what we need to configure as example, use deep analysis")
+    assert "Dem" in p.modules and "Dcm" in p.modules
+    assert "Com" not in p.modules
+    assert p.corrections  # UI "Interpreted as" record populated

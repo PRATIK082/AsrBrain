@@ -35,6 +35,9 @@ MODULE_ALIASES = {
 MODULE_GROUPS = {
     "diagnostic": ("Dcm", "Dem"),
     "diagnostics": ("Dcm", "Dem"),
+    # user shorthand — without this, "diag DTC ..." gets no module filter
+    "diag": ("Dcm", "Dem"),
+    "diags": ("Dcm", "Dem"),
 }
 
 

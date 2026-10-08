@@ -24,6 +24,9 @@ class QueryPlan(BaseModel):
     needs_graph_search: bool = False
     needs_comparison_table: bool = False
     confidence: float = 0.0
+    # auto-correction record: [{"from": raw, "to": fixed}] — shown as
+    # "Interpreted as" in the UI; retrieval fuses both query forms
+    corrections: list = Field(default_factory=list)
 
 
 class ClaimVerdict(BaseModel):

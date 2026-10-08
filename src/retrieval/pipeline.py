@@ -26,9 +26,15 @@ class RetrievalPipeline:
         def per_release(release: str) -> list[dict]:
             pool = apply_filters(self.chunks, plan, release_override=release)
             idx_map = [self.chunks.index(c) for c in pool] or list(range(len(self.chunks)))
-            # score only the filtered pool
+            # score only the filtered pool; fuse the raw AND the corrected query
+            # so a bad auto-correction can never sink a good original (and vice
+            # versa) — the "Interpreted as" form only ADDS recall.
             dense_all = self.index.dense_scores(query)
             bm25_all = self.index.bm25_scores(query)
+            norm_q = plan.normalized_query or query
+            if norm_q != query:
+                dense_all = (dense_all + self.index.dense_scores(norm_q)) / 2.0
+                bm25_all = (bm25_all + self.index.bm25_scores(norm_q)) / 2.0
             order = np.argsort(-dense_all)[: settings.topk_dense]
             dense_rank = [self.index.chunk_ids[i] for i in order if self.index.chunk_ids[i] in {c["chunk_id"] for c in pool}]
             order_b = np.argsort(-bm25_all)[: settings.topk_bm25]

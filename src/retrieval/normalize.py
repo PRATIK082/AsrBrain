@@ -22,10 +22,52 @@ _TECH_WORDS = {
     "comparison", "diagnostic", "troubleshoot", "sequence", "behavior", "behaviour",
     "return", "error", "message", "communication", "service", "discovery",
     "definition", "purpose", "explain", "version", "release", "module", "between",
+    # everyday words users mistype (fuzzy targets for the typo layer)
+    "detailed", "details", "property", "properties", "required", "mapping",
+    "analysis", "question", "questions", "example", "examples", "element",
+    "elements", "derive", "derived", "need", "needs", "provide", "provided",
 }
 _VOCAB = sorted(set(MODULE_ALIASES) | {m.lower() for m in MODULE_ALIASES.values()} | _TECH_WORDS)
 
-# multi-word alias merges ("can if" → "CanIf")
+# Curated typo map from real user input (whole-word, case-insensitive).
+# Runs BEFORE fuzzy matching so observed misspellings fix deterministically
+# instead of depending on difflib cutoffs. Never touches identifiers —
+# application order is: TYPO_MAP → ABBREV_MAP → multi-word merge → fuzzy.
+_TYPO_MAP = {
+    "alla": "all",
+    "hot": "how",  # "hot to map" → "how to map"
+    "teh": "the", "nad": "and", "wich": "which", "whch": "which",
+    "requared": "required", "requried": "required", "requird": "required",
+    "deatiled": "detailed", "detialed": "detailed", "detials": "details",
+    "proparty": "property", "proparties": "properties", "propetry": "property",
+    "queation": "question", "quear": "question", "quetion": "question",
+    "anaylsis": "analysis", "analsysis": "analysis",
+    "chnage": "change", "chaneg": "change",
+    "speling": "spelling", "spelling": "spelling",
+    "elemnt": "element", "elemnts": "elements", "elment": "element",
+    "maping": "mapping", "mappping": "mapping",
+    "configruation": "configuration", "configuraion": "configuration",
+    "explane": "explain", "explan": "explain",
+    "defination": "definition", "definations": "definitions",
+    "exmaple": "example", "exmple": "example",
+    "diagostic": "diagnostic", "diagnostc": "diagnostic",
+    "communcation": "communication", "comunication": "communication",
+    "intialization": "initialization", "initialisation": "initialization",
+    "architecure": "architecture", "archietcture": "architecture",
+    "topolgy": "topology", "topologie": "topology",
+}
+
+# Shorthand → full term so module/intent detection sees the real word.
+# "diag" is the critical one: without it, diagnostic questions get no module
+# filter and drown in Com-heavy corpus evidence.
+_ABBREV_MAP = {
+    "diag": "diagnostic",
+    "diags": "diagnostics",
+    "config": "configuration",
+    "init": "initialization",
+    "req": "requirement",
+    "reqs": "requirements",
+}
 _SPACED_EXTRA = {"can if": "CanIf", "some ip": "SOME-IP", "can sm": "CanSM",
                  "can drv": "CanDrv", "pdu r": "PduR"}
 _MULTI = {**{k: v for k, v in MODULE_ALIASES.items() if " " in k or "/" in k},
@@ -34,6 +76,33 @@ _MULTI = {**{k: v for k, v in MODULE_ALIASES.items() if " " in k or "/" in k},
 _PROTECTED = re.compile(
     r"^(\[?(?:SWS|RS|PRS)_[A-Za-z0-9_\-]+R?\d*\]?|[A-Z][A-Za-z0-9]*_[A-Za-z0-9_]+"
     r"|R\d{2}-11|\d+\.\d+(?:\.\d+)?|E_[A-Z_]+|\[E\d+\])$")
+
+
+def _apply_fixed_maps(text: str, changes: list) -> str:
+    """Step 0: curated typo/abbrev fixes, per-token and identifier-safe.
+
+    Skips protected identifiers (API names, requirement IDs, versions) and
+    anything containing '_' so e.g. "Rte_Init" can never become
+    "Rte_initialization".
+    """
+    parts = re.split(r"(\s+)", text)
+    out: list[str] = []
+    for tok in parts:
+        if not tok.strip():
+            out.append(tok)
+            continue
+        core = tok.strip(".,?:;!\"'()")
+        if ("_" in core or len(core) <= 2
+                or _PROTECTED.match(core) or core.lower() not in _FIXED_MAP):
+            out.append(tok)
+            continue
+        fixed = _match_case(_FIXED_MAP[core.lower()], core)
+        out.append(tok.replace(core, fixed))
+        changes.append((core, fixed))
+    return "".join(out)
+
+
+_FIXED_MAP = {**_TYPO_MAP, **_ABBREV_MAP}
 
 
 def _match_case(fixed_lower: str, original: str) -> str:
@@ -48,6 +117,8 @@ def _match_case(fixed_lower: str, original: str) -> str:
 def correct_query(query: str) -> tuple[str, list[tuple[str, str]]]:
     changes: list[tuple[str, str]] = []
     text = re.sub(r"\s+", " ", query).strip()
+    # 0. curated typo/shorthand fixes (identifier-safe)
+    text = _apply_fixed_maps(text, changes)
     # 1. multi-word alias merge (case-insensitive)
     lowered = text.lower()
     for alias, canon in sorted(_MULTI.items(), key=lambda kv: -len(kv[0])):
