@@ -402,3 +402,110 @@ def api_modules():
         mods, dts = [], []
     conn.close()
     return {"modules": mods, "document_types": dts}
+
+
+# ---------------- Phase 2: enterprise orchestration (human-in-the-loop) ----------------
+# ARXML parsed deterministically first; RAG only explains. All endpoints server-enforce
+# tenant scope; cloud routing is policy-driven; code findings are advisory-only.
+
+_ARXML_STORE: dict = {}  # artifact_id -> {topology, graph} (replace with object store per tenant)
+
+
+def _ctx_from_headers(tenant: str = "default", user: str = "local-operator",
+                      project: str = "", cloud: str = "local_only") -> "SecurityContext":
+    from src.security.context import SecurityContext
+    return SecurityContext(user_id=user, tenant_id=tenant, project_id=project or None,
+                           cloud_policy=cloud if cloud in (
+                               "local_only", "cloud_metadata_only",
+                               "cloud_redacted_only", "cloud_allowed") else "local_only",
+                           audit_request_id="api")
+
+
+@app.get("/api/policies/effective")
+def api_policies_effective(tenant: str = "default", cloud: str = "local_only"):
+    from src.security.policy import classify_content
+    ctx = _ctx_from_headers(tenant, cloud=cloud)
+    return {"tenant_id": ctx.tenant_id, "cloud_policy": ctx.cloud_policy,
+            "flags": {"pipeline": settings.pipeline_version if hasattr(settings, "pipeline_version") else "v1",
+                      "arxml": settings.arxml_enabled, "diff": settings.diff_enabled,
+                      "code_intel": settings.code_intel_enabled,
+                      "strict_local_only": settings.strict_local_only},
+            "note": classify_content("", "spec.pdf").policy_reason}
+
+
+@app.post("/api/arxml/upload")
+async def api_arxml_upload(file: UploadFile = File(...), tenant: str = "default", project: str = ""):
+    if not settings.arxml_enabled:
+        raise HTTPException(503, "ARXML intelligence disabled by feature flag")
+    from src.ingestion.arxml import parse_arxml, export_graph
+    from src.security.policy import classify_content
+    data = await file.read()
+    tmp = f"/tmp/{file.filename or 'upload.arxml'}"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    risk = classify_content(data.decode("utf-8", "ignore")[:20000], file.filename or "")
+    topo = parse_arxml(tmp, tenant_id=tenant, project_scope=project)
+    graph = export_graph(topo)
+    _ARXML_STORE[topo.artifact.artifact_id] = {"topology": topo, "graph": graph}
+    return {"artifact_id": topo.artifact.artifact_id, "classification": risk.classification,
+            "route": "local", "components": len(topo.components), "ports": len(topo.ports),
+            "interfaces": len(topo.interfaces), "connectors": len(topo.connectors),
+            "warnings": topo.artifact.validation_warnings}
+
+
+@app.get("/api/arxml/artifacts")
+def api_arxml_list(tenant: str = "default"):
+    return [{"artifact_id": k, "source": v["topology"].artifact.source_path,
+             "tenant_id": v["topology"].artifact.tenant_id,
+             "components": len(v["topology"].components)}
+            for k, v in _ARXML_STORE.items() if v["topology"].artifact.tenant_id == tenant]
+
+
+@app.get("/api/arxml/topology")
+def api_arxml_topology(artifact_id: str, tenant: str = "default"):
+    entry = _ARXML_STORE.get(artifact_id)
+    if not entry or entry["topology"].artifact.tenant_id != tenant:
+        raise HTTPException(404, "artifact not found or access denied")
+    return entry["topology"].model_dump()
+
+
+@app.get("/api/arxml/nodes/{node_id}/neighbors")
+def api_arxml_neighbors(node_id: str, artifact_id: str, tenant: str = "default", depth: int = 1):
+    from src.ingestion.arxml import neighbors
+    entry = _ARXML_STORE.get(artifact_id)
+    if not entry or entry["topology"].artifact.tenant_id != tenant:
+        raise HTTPException(404, "artifact not found or access denied")
+    return neighbors(entry["graph"], node_id, depth=min(depth, 3))
+
+
+class DiffRequest(BaseModel):
+    base: list[dict]
+    target: list[dict]
+    domain: str = "api"
+
+
+@app.post("/api/diff")
+def api_diff(req: DiffRequest):
+    if not settings.diff_enabled:
+        raise HTTPException(503, "diff engine disabled by feature flag")
+    from src.diff import diff_records
+    return [d.model_dump() for d in diff_records(req.base, req.target, req.domain)]
+
+
+class CodeReviewRequest(BaseModel):
+    source: str
+    path: str = "input.c"
+    port_names: list[str] = []
+
+
+@app.post("/api/code/analyze")
+def api_code_analyze(req: CodeReviewRequest):
+    if not settings.code_intel_enabled:
+        raise HTTPException(503, "code intelligence disabled by feature flag")
+    from src.code_intelligence import preflight_checks, rte_call_sites, map_rte_to_arxml
+    findings = preflight_checks(req.source, req.path)
+    calls = rte_call_sites(req.source)
+    links = map_rte_to_arxml(calls, req.port_names)
+    return {"findings": [f.model_dump() for f in findings], "rte_calls": calls,
+            "traceability": [lnk.model_dump() for lnk in links],
+            "disclaimer": "Advisory only — not a MISRA/ISO 26262 compliance determination."}

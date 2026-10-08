@@ -27,6 +27,14 @@ class Settings:
     pdf_dir: str = field(default_factory=lambda: _get("PDF_DIR", "pdf"))
     qdrant_url: str = field(default_factory=lambda: _get("QDRANT_URL", "http://localhost:6333"))
     qdrant_collection: str = field(default_factory=lambda: _get("QDRANT_COLLECTION", "autosar_chunks"))
+    # Enterprise orchestration Phase 2/3 feature flags (reversible migration)
+    pipeline_version: str = field(default_factory=lambda: _get("ASRBRAIN_PIPELINE_VERSION", "v1"))
+    arxml_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_ARXML_ENABLED", "true").lower() == "true")
+    diff_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_DIFF_ENABLED", "true").lower() == "true")
+    code_intel_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_CODE_INTELLIGENCE_ENABLED", "true").lower() == "true")
+    cloud_routing_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_CLOUD_ROUTING_ENABLED", "false").lower() == "true")
+    strict_local_only: bool = field(default_factory=lambda: _get("ASRBRAIN_STRICT_LOCAL_ONLY", "true").lower() == "true")
+    vendor_plugins_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_VENDOR_PLUGINS_ENABLED", "false").lower() == "true")
 
 
 settings = Settings()
