@@ -20,6 +20,12 @@ import re
 import streamlit as st
 import streamlit.components.v1 as components
 
+import importlib.util as _ilu
+
+_THEME_SPEC = _ilu.spec_from_file_location("asr_theme", Path(__file__).with_name("theme.py"))
+asr_theme = _ilu.module_from_spec(_THEME_SPEC)
+_THEME_SPEC.loader.exec_module(asr_theme)
+
 
 def _autoscroll():
     """ChatGPT-style follow: pin the view to the newest message after each run."""
@@ -62,6 +68,7 @@ from src.chat.store import ChatStore
 from src.ingestion.pipeline import run as run_ingest
 
 st.set_page_config(page_title="AUTOSAR Copilot", page_icon="🚗", layout="wide")
+asr_theme.inject()
 
 store = ChatStore()
 
@@ -123,6 +130,7 @@ if st.session_state.get("_model_cid") != st.session_state.cid:
 
 # ---------------- sidebar: conversations + settings ----------------
 with st.sidebar:
+    asr_theme.brand()
     st.header("💬 Conversations")
     if st.button("＋ New conversation", use_container_width=True):
         st.session_state.cid = store.create()["id"]
@@ -296,8 +304,21 @@ with st.sidebar:
                        file_name="conversation.md", use_container_width=True)
 
 # ---------------- main chat ----------------
-st.title("🚗 AUTOSAR Knowledge Copilot")
 conv = store.get(st.session_state.cid) or {"messages": [], "slots": {}}
+if not conv.get("messages"):
+    _scope = f"{st.session_state.get('scope_type', 'project')}:{st.session_state.get('scope_name', 'default')}"
+    try:
+        from src.ingestion.project_sources import load_registry as _load_reg
+        _nfiles = sum(int(s.get("files_indexed", 0)) for s in _load_reg())
+    except Exception:
+        _nfiles = 0
+    asr_theme.hero(_scope, _nfiles)
+    _chosen = asr_theme.quick_cards()
+    if _chosen:
+        st.session_state.pending = _chosen
+        st.rerun()
+else:
+    st.markdown("### 🚗 AUTOSAR Knowledge Copilot")
 slots = conv.get("slots", {})
 
 # resume persisted working context (evidence/trace/follow-ups survive restarts)
