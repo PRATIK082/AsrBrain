@@ -45,7 +45,7 @@ section[data-testid="stSidebar"] {{ background: {t['panel']}; border-right: 1px 
 section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] label, section[data-testid="stSidebar"] span {{ color: {t['ink']} !important; }}
 section[data-testid="stMain"] {{ background: {t['bg']}; }}
-.block-container {{ max-width: 1060px; padding-top: 0.6rem; }}
+.block-container {{ max-width: 1220px; padding-top: 0.6rem; }}
 
 /* ---------- brand ---------- */
 .asr-brand {{ display: flex; align-items: center; gap: 10px; padding: 4px 2px 10px; }}
@@ -134,6 +134,32 @@ code, .stMarkdown code {{ font-family: 'JetBrains Mono', monospace !important; }
 .asr-foot {{ text-align: center; font-size: 11px; color: {t['muted']}; padding: 14px 0 4px; }}
 .asr-ok {{ color: {t['green']}; font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
 .asr-warn {{ color: {t['amber']}; font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
+/* ---------- large data: tables / code / media fit any width ---------- */
+.stMarkdown table, .stChatMessage table {{
+  display: block; width: max-content; max-width: 100%;
+  overflow-x: auto; border-collapse: collapse;
+  font-size: 12.5px; margin: 10px 0; border-radius: 10px;
+}}
+.stMarkdown th, .stMarkdown td, .stChatMessage th, .stChatMessage td {{
+  padding: 7px 10px; border: 1px solid {t['border']}; text-align: left;
+  vertical-align: top; overflow-wrap: anywhere; word-break: break-word;
+  min-width: 80px;
+}}
+.stMarkdown th, .stChatMessage th {{
+  background: {t['panel2']}; font-weight: 700; white-space: nowrap;
+}}
+.stMarkdown td code, .stChatMessage td code {{
+  overflow-wrap: anywhere; word-break: break-all; white-space: normal;
+}}
+.stChatMessage pre {{ max-width: 100%; overflow-x: auto; }}
+.stChatMessage img, .stMarkdown img {{ max-width: 100%; height: auto; border-radius: 10px; }}
+.stChatMessage p, .stChatMessage li, .stMarkdown p {{ overflow-wrap: anywhere; }}
+.stChatMessage .stMarkdown, section[data-testid="stMain"] .stMarkdown {{ min-width: 0; }}
+@media (max-width: 900px) {{
+  .block-container {{ max-width: 100%; padding-left: .8rem; padding-right: .8rem; }}
+  .stMarkdown table, .stChatMessage table {{ font-size: 11.5px; }}
+  .asr-hero h1 {{ font-size: 30px; }}
+}}
 @media (max-width: 640px) {{ .asr-cards {{ grid-template-columns: 1fr; }} .asr-hero h1 {{ font-size: 30px; }} }}
 .asr-cards {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px auto 0; max-width: 640px; }}
 </style>
