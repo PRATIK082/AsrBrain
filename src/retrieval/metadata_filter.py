@@ -24,4 +24,19 @@ def apply_filters(chunks: list[dict], plan: QueryPlan, release_override: str = "
             if c["module"] not in plan.modules:
                 continue
         out.append(c)
+    if not out and plan.modules:
+        # The tagged document for this module is not in the corpus (yet).
+        # Answering from general evidence beats abstaining — retry without the
+        # module constraint, keeping the release/platform guardrails.
+        relaxed = QueryPlan(**{**plan.model_dump(), "modules": []}) if hasattr(plan, "model_dump") else None
+        if relaxed is not None:
+            return apply_filters(chunks, relaxed, release_override=release_override)
+        for c in chunks:
+            is_project = (c.get("document_type") in ("code", "arxml", "config", "diagram")
+                          or (c.get("chunk_id") or "").startswith("ps-"))
+            if plan.platforms and not is_project and (c.get("platform") or "") not in plan.platforms:
+                continue
+            if rels and plan.release_mode in ("exact",) and not is_project and (c.get("autosar_release") or "") not in rels:
+                continue
+            out.append(c)
     return out

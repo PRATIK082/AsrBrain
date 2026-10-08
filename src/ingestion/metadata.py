@@ -16,7 +16,51 @@ MODULE_ALIASES = {
     "ecuc": "ECUC", "ecu configuration": "ECUC",
     "ara::com": "ara::com",
     "doip": "DoIP", "xcp": "XCP", "dcm": "Dcm", "dem": "Dem",
+    # RTE / software-component world
+    "rte": "RTE", "run-time environment": "RTE", "runtime environment": "RTE",
+    "runnable": "RTE", "runnables": "RTE",
+    "swc": "RTE", "software component": "RTE", "software components": "RTE",
+    "vfb": "RTE", "virtual functional bus": "RTE",
+    # Diagnostics: DTC / event memory lives in Dem, protocol/services in Dcm
+    "dtc": "Dem", "diagnostic trouble code": "Dem", "diagnostic event": "Dem",
+    "debounce": "Dem", "freeze frame": "Dem", "obd": "Dem",
+    "uds": "Dcm", "unified diagnostic services": "Dcm",
+    "det": "Det", "default error tracer": "Det",
+    "bsw": "BSW", "basic software": "BSW",
+    "mcal": "MCAL", "microcontroller abstraction": "MCAL",
 }
+
+# Generic umbrella words that legitimately span several modules. Values are
+# tuples so the query parser can keep evidence from ALL of them (OR filter).
+MODULE_GROUPS = {
+    "diagnostic": ("Dcm", "Dem"),
+    "diagnostics": ("Dcm", "Dem"),
+}
+
+
+def word_hit(text_lower: str, phrase: str) -> bool:
+    """True when phrase occurs as whole word(s), never as a substring.
+
+    This is the fix for the classic false positive where the alias ``com``
+    matched inside "communication", "component", "complete" or "compare"
+    and forced every such question through a Com-only evidence filter.
+    """
+    return re.search(r"(?<![a-z0-9])" + re.escape(phrase.lower()) + r"(?![a-z0-9])",
+                     text_lower) is not None
+
+
+def module_for_api(api_name: str) -> str:
+    """Infer the owning module from an AUTOSAR API name prefix (Dem_Xxx→Dem).
+
+    Returns "" when the prefix is not a known module — no filter is always
+    safer than a wrong filter.
+    """
+    prefix = (api_name or "").split("_")[0].strip().lower()
+    if not prefix:
+        return ""
+    canon = MODULE_ALIASES.get(prefix, "")
+    known = set(MODULE_ALIASES.values()) | {m for g in MODULE_GROUPS.values() for m in g}
+    return canon if canon in known else ""
 
 PLATFORM_WORDS = {"classic": "Classic", "adaptive": "Adaptive", "foundation": "Foundation"}
 

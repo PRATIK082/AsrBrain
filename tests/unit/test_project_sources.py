@@ -65,6 +65,30 @@ def test_project_chunks_survive_spec_filters():
     assert "ps-abc" in ids and "t1" in ids
 
 
+def test_module_filter_relaxes_when_tagged_doc_missing():
+    # RTE asked, but corpus only has Com — must answer from general evidence,
+    # never from an empty pool.
+    chunks = [
+        {"chunk_id": "c1", "module": "Com", "platform": "", "autosar_release": "",
+         "document_type": "text", "normalized_text": "Com spec"},
+    ]
+    plan = QueryPlan(original_query="q", intent="deep_explanation", modules=["RTE"])
+    out = apply_filters(chunks, plan)
+    assert [c["chunk_id"] for c in out] == ["c1"]
+
+
+def test_module_filter_applies_when_tagged_doc_present():
+    chunks = [
+        {"chunk_id": "c1", "module": "Com", "platform": "", "autosar_release": "",
+         "document_type": "text", "normalized_text": "Com spec"},
+        {"chunk_id": "d1", "module": "Dem", "platform": "", "autosar_release": "",
+         "document_type": "text", "normalized_text": "Dem spec"},
+    ]
+    plan = QueryPlan(original_query="q", intent="definition", modules=["Dem"])
+    out = apply_filters(chunks, plan)
+    assert [c["chunk_id"] for c in out] == ["d1"]
+
+
 def test_token_caps_file_and_settings():
     from src.config.settings import TOKEN_CAPS
     assert TOKEN_CAPS["concise"] > 0 and TOKEN_CAPS["detailed"] > TOKEN_CAPS["concise"]
