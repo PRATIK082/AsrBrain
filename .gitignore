@@ -21,5 +21,7 @@ pdf/uploads/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
 # local Streamlit secrets
 .streamlit/secrets.toml
