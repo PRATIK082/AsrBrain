@@ -5,6 +5,57 @@ Chatbox-style chat UI (no filter forms to fill): the assistant asks back for a m
 release/platform, auto-detects the module with Confirm/Change, and routes document type
 automatically. Every factual claim carries a source citation (PDF + pages + requirement IDs).
 
+> **Merged:** `feature/multimodal-rag-chatbox-upgrade` → `main` (PR #1, `0726bb5`).
+> Adds the multimodal RAG stack: canonical multimodal model (`src/schema/canonical.py`,
+> `src/schema/multimodal_graph.py`), parser adapters (`src/ingestion/parser_adapter.py`),
+> text/table/figure processors (`src/ingestion/processors.py`), query planner
+> (`src/retrieval/planner.py`), modality fusion (`src/retrieval/modality_fusion.py`),
+> context rules (`src/retrieval/context_rules.py`), generation routing
+> (`src/generation/routing.py`), collections (`src/indexing/collections.py`),
+> plus audits/migration docs in `docs/` and `tests/unit/test_canonical_multimodal.py`.
+
+## UI view — chatbox at a glance
+
+Streamlit (`apps/streamlit/app.py`, wide layout, dark/light themes) and the React
+skeleton (`frontend/app/page.tsx`, same `/api/` SSE contract) share one look:
+
+```
+┌─────────────┬───────────────────────────────────────────────────┐
+│  Sidebar    │  🚗 AUTOSAR Knowledge Copilot        [Chat|Evidence│
+│  ────────   │───────────────────────────────────────────────────│
+│ Conversations│  👤 Explain CanIf initialization                  │
+│ New/Search/  │  🤖 CanIf init sequence … [E1][E2]                 │
+│ Rename/Delete│  📚 Sources (2) ▸ SWS_CanIf.pdf p.12 · 4.4.0 …     │
+│ ⑂ Fork      │  Detected: CanIf [✓ Confirm] [Change ▾]             │
+│ 💾 Save/Load │  Mode: troubleshooting (auto) · Interpreted as …   │
+│ 🤖 Model    │  [Evidence cards] [Trace timeline] [Graph] [👍][👎]  │
+│ Ollama/Cloud│─────────────────────────────────────────────────── │
+│ Eco/Bal/Deep│  Ask about AUTOSAR… [Send] [⏹ Stop]                 │
+│ 📄 Upload   │  follow-ups: payoff chips (3–4, clickable)          │
+└─────────────┴───────────────────────────────────────────────────┘
+```
+
+| Area | What you see | Source |
+|---|---|---|
+| Sidebar | Conversation list, search/rename/delete, ⑂ Fork with another model, 💾 Session save/resume (`.json` bundle), provider picker (Local Ollama / Cloud API key, session-only), Evidence depth Eco(4)/Balanced(8)/Deep(12), Response length Concise/Standard/Detailed, 📄 PDF upload + ingest, ⬇ Export `.md` | `apps/streamlit/app.py:145-239` |
+| Chat tab | Streaming answer (`token` events + ▌ cursor), staged status (`QueryPlan → retrieval → RRF → rerank → generation`), clarification chips (releases/platforms), module Confirm/Change, `📚 Sources (n)` expander (one line per `[En]`: file · pages · release · section), 👍/👎 feedback, ✏️ Edit & resend, ⏹ Stop | `apps/streamlit/app.py:286-399`, `frontend/app/page.tsx:8-73` |
+| Evidence tab | Cited passages `[En]` with PDF + pages + requirement/API IDs | `src/retrieval/modalities.py`, `src/schema/multimodal.py` |
+| Trace tab | QueryPlan, routing (doctype auto), per-release retrieval, fusion/rerank, token caps, verification/confidence | `src/workflows/stages.py`, `src/generation/routing.py` |
+| Graph tab | Requirement/API/ECUC/table/figure links (multimodal graph) | `src/schema/multimodal_graph.py`, `src/retrieval/graph.py` |
+
+**Screenshots:** none checked in yet (no `*.png` in repo). To add:
+1. `streamlit run apps/streamlit/app.py` → ask “Explain CanIf initialization” → screenshot chat + Evidence/Trace tabs.
+2. Save to `docs/images/chatbox-chat.png`, `docs/images/chatbox-evidence.png`, `docs/images/chatbox-trace.png`.
+3. Reference them here:
+   `![Chat](docs/images/chatbox-chat.png)` etc.
+
+Run the UI:
+
+```bash
+streamlit run apps/streamlit/app.py   # self-contained, works without API server
+# optional React: cd frontend && npm install && npm run dev   # needs API on :8000
+```
+
 ## Quickstart
 
 ```bash
@@ -82,10 +133,10 @@ Streamlit + Ollama. Phase 2 adds OpenSearch; Phase 3 adds Neo4j/graph + Qdrant m
 | `apps/api/main.py` | FastAPI: legacy `/query /ingest /evaluate` + chat contract `/api/conversations /api/chat /api/chat/stream /api/chat/stop /api/documents /api/sources /api/feedback /api/models /api/releases /api/modules` |
 | `apps/streamlit/app.py` | Chatbox UI: conversation sidebar (new/search/rename/delete), chat history, streaming, regenerate/edit/stop, clarification chips, citation cards, evidence/trace/graph tabs, upload, export |
 | `frontend/` | React/Next.js skeleton (same `/api/` contract, SSE streaming, zustand settings) — `full` Compose profile |
-| `src/ingestion/` | `pipeline.py` (+tables/figures stores), `parsers.py` (Docling/PyMuPDF/pypdf adapters + quality routing), `pdf_extract.py`, `chunking.py`, `metadata.py` |
-| `src/schema/` | `documents.py`, `queries.py`, `graph.py` (+confidence/is_inferred), `multimodal.py` (MultimodalEvidence) |
-| `src/retrieval/` | `query_understanding.py`, `clarify.py` (slot-fill), `modalities.py` (req/API/ECUC/table/figure), `fusion.py`, `reranking.py`, `context.py`, `pipeline.py`, `graph.py` |
-| `src/generation/` | `providers.py` (Ollama + OpenAI-compat cloud, streaming), `prompts.py` (per-mode formats), `answer.py`, `citations.py`, `verification.py` |
+| `src/ingestion/` | `pipeline.py` (+tables/figures stores), `parsers.py` (Docling/PyMuPDF/pypdf adapters + quality routing), `pdf_extract.py`, `chunking.py`, `metadata.py`, `parser_adapter.py` + `processors.py` (merged multimodal adapters) |
+| `src/schema/` | `documents.py`, `queries.py`, `graph.py` (+confidence/is_inferred), `multimodal.py` (MultimodalEvidence), `canonical.py` + `multimodal_graph.py` (merged multimodal model) |
+| `src/retrieval/` | `query_understanding.py`, `clarify.py` (slot-fill), `modalities.py` (req/API/ECUC/table/figure), `fusion.py`, `reranking.py`, `context.py`, `pipeline.py`, `graph.py`, `planner.py` + `modality_fusion.py` + `context_rules.py` (merged) |
+| `src/generation/` | `providers.py` (Ollama + OpenAI-compat cloud, streaming), `prompts.py` (per-mode formats), `answer.py`, `citations.py`, `verification.py`, `routing.py` (merged multimodal routing) |
 | `src/workflows/` | `router.py` (legacy path), `stages.py` (SSE staged events + cancel) |
 | `src/chat/store.py` | Conversations/messages/slots/feedback SQLite |
 
