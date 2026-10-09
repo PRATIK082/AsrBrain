@@ -5,7 +5,9 @@ Chatbox-style chat UI (no filter forms to fill): the assistant asks back for a m
 release/platform, auto-detects the module with Confirm/Change, and routes document type
 automatically. Every factual claim carries a source citation (PDF + pages + requirement IDs).
 
-> **Merged:** `feature/multimodal-rag-chatbox-upgrade` → `main` (PR #1, `0726bb5`).
+> **Merged:** `feature/multimodal-rag-chatbox-upgrade` → `main` via true merge
+> commit `631778b` (parents: `main` + `875a9d5`; earlier squash `0726bb5`/PR #1
+> carried the same content).
 > Adds the multimodal RAG stack: canonical multimodal model (`src/schema/canonical.py`,
 > `src/schema/multimodal_graph.py`), parser adapters (`src/ingestion/parser_adapter.py`),
 > text/table/figure processors (`src/ingestion/processors.py`), query planner
