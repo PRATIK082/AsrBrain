@@ -1,3 +1,5 @@
+![AsrBrain — Your Local AI Co-Pilot for AUTOSAR Engineering](docs/images/project-overview.png)
+
 # AUTOSAR Knowledge Copilot
 
 Local-first, citation-grounded RAG for AUTOSAR Classic / Adaptive / Foundation specifications.
