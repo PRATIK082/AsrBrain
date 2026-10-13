@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { api } from "../lib/api";
 import type { CodeFinding, DiffItem } from "../lib/types";
 import { useAsrBrainStore } from "../store/useAsrBrainStore";
 import { useSettings } from "../stores/settings-store";
 import { useAsrStream } from "../hooks/useAsrStream";
+import { ChatMessage } from "../components/chat/ChatMessage";
 import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
 import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
 
@@ -89,14 +89,14 @@ function ChatPane() {
           <div key={m.id} className={m.role === "user" ? "text-right" : "text-left"}>
             <div className={`inline-block max-w-3xl rounded border p-3 text-left ${
               m.role === "user" ? "border-[#222D3F] bg-[#121824]" : "border-[#222D3F] bg-[#0D1320]"}`}>
-              <ReactMarkdown>{m.content}</ReactMarkdown>
+              <ChatMessage content={m.content} />
             </div>
           </div>
         ))}
         {isStreaming && streamedResponse && (
           <div className="text-left">
             <div className="inline-block max-w-3xl rounded border border-[#00F5FF]/30 bg-[#0D1320] p-3 text-left">
-              <ReactMarkdown>{streamedResponse}</ReactMarkdown>
+              <ChatMessage content={streamedResponse} streaming />
             </div>
           </div>
         )}

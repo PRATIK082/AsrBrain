@@ -34,6 +34,60 @@ def _autoscroll():
         "if (el) el.scrollTop = el.scrollHeight;</script>", height=0)
 
 
+def _render_mermaid_blocks(body: str) -> None:
+    """Render ```mermaid fences as SVG via mermaid.js; rest as markdown.
+
+    Graceful fallback: invalid syntax shows a copyable code block, never crashes.
+    """
+    import html as _html
+    import uuid as _uuid
+    parts = re.split(r"(```mermaid.*?```)", body, flags=re.I | re.S)
+    if len(parts) == 1:
+        st.markdown(body)
+        return
+    for part in parts:
+        m = re.match(r"```mermaid\s+(.*?)```", part, flags=re.I | re.S)
+        if not m:
+            if part.strip():
+                st.markdown(part)
+            continue
+        code = m.group(1).strip()
+        if not code:
+            continue
+        uid = f"asr-mmd-{_uuid.uuid4().hex[:8]}"
+        safe = _html.escape(code)
+        _html_doc = """<div id="UID-wrap" style="border:1px solid #222D3F;border-radius:8px;
+                background:#0D1320;padding:12px;overflow-x:auto;min-height:120px">
+              <div id="UID-ph" style="font-family:monospace;font-size:12px;color:#00F5FF">
+                Rendering diagram…</div>
+              <pre id="UID-src" style="display:none">SAFE</pre>
+            </div>
+            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+            <script>
+              (function(){
+                var code = document.getElementById("UID-src").textContent;
+                var wrap = document.getElementById("UID-wrap");
+                var ph = document.getElementById("UID-ph");
+                var src = document.getElementById("UID-src");
+                function fallback(){
+                  ph.style.color = "#F59E0B";
+                  ph.textContent = "Diagram render failed - showing source:";
+                  src.style.display = "block";
+                  src.style.cssText = "background:#121824;color:#F1F5F9;padding:12px;"
+                    + "border-radius:8px;overflow:auto;font-size:12px;white-space:pre-wrap;";
+                }
+                try {
+                  mermaid.initialize({startOnLoad:false, theme:"dark",
+                    themeVariables:{background:"#0D1320"}});
+                  mermaid.render("UID", code).then(function(r){
+                    wrap.innerHTML = r.svg;
+                  }).catch(function(e){ fallback(); });
+                } catch(e) { fallback(); }
+              })();
+            </script>""".replace("UID", uid).replace("SAFE", safe)
+        components.html(_html_doc, height=420)
+
+
 def _split_sources(content: str) -> tuple[str, str]:
     if "\n## Sources\n" in content:
         body, src = content.split("\n## Sources\n", 1)
@@ -395,7 +449,7 @@ with tab_chat:
             asr_theme.role_ribbon(m["role"], m.get("meta") if isinstance(m.get("meta"), dict) else {})
             if m["role"] == "assistant":
                 body, src = _split_sources(m["content"])
-                st.markdown(body)
+                _render_mermaid_blocks(body)
                 if src.strip():
                     with st.expander(f"📚 Sources ({len(_cite_labels(m['content']))})", expanded=False):
                         for line in _compact_sources(src):
@@ -501,7 +555,8 @@ with tab_chat:
                 st.rerun()
             full = (final_ev or {}).get("answer", acc)
             body, src = _split_sources(full)
-            ph.markdown(body)  # chat shows the answer; sources collapse below
+            ph.empty()
+            _render_mermaid_blocks(body)  # chat shows the answer; sources collapse below
             if src.strip():
                 with st.expander(f"📚 Sources ({len(_cite_labels(full))})", expanded=False):
                     for line in _compact_sources(src):
