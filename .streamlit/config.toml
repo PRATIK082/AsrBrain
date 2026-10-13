@@ -1,0 +1,13 @@
+# Streamlit native chrome — pin dark obsidian so the header, toolbar and
+# default widgets never flash white. In-app Light mode is layered on top
+# by apps/streamlit/theme.py (custom CSS), which overrides widget styling.
+[theme]
+base = "dark"
+primaryColor = "#00E5FF"
+backgroundColor = "#06090E"
+secondaryBackgroundColor = "#101724"
+textColor = "#EDF2F7"
+font = "sans serif"
+
+[server]
+headless = false

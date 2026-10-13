@@ -7,6 +7,13 @@ MODULE_EXPANSIONS = {
     "PduR": ["PDU Router", "PduR routing"],
     "CanDrv": ["CAN Driver"],
     "CanSM": ["CAN State Manager"],
+    "Com": ["COM stack", "Com_SendSignal", "signal gateway"],
+    "RTE": ["Run-Time Environment", "runnable", "software component", "VFB"],
+    "Dem": ["Diagnostic Event Manager", "DTC", "diagnostic trouble code", "event memory"],
+    "Dcm": ["Diagnostic Communication Manager", "UDS", "diagnostic session"],
+    "Det": ["Default Error Tracer", "Det_ReportError"],
+    "BSW": ["Basic Software", "BSW scheduler"],
+    "MCAL": ["Microcontroller Abstraction Layer"],
     "SOME-IP": ["SOMEIP", "SOME/IP", "service oriented communication"],
 }
 

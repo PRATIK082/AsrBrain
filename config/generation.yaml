@@ -1,0 +1,17 @@
+# User-editable generation token caps.
+# The Streamlit sidebar "Response length" picker maps to these three presets.
+# Change the numbers, save, and rerun — no code edits needed.
+# Environment variables (LLM_NUM_PREDICT, LLM_NUM_CTX) override these values.
+response_presets:
+  concise: 400    # ~1-2 min on CPU
+  standard: 600   # balanced default
+  detailed: 1200  # deep answers, slower on CPU
+
+# Context window passed to local Ollama (num_ctx). Lower it if you hit memory limits.
+num_ctx: 8192
+
+# Retrieval breadth per answer (overrides TOPK/FINAL_EVIDENCE when set).
+evidence_depths:
+  eco: 4
+  balanced: 8
+  deep: 12

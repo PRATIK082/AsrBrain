@@ -6,7 +6,7 @@ import sys
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
-log = logging.getLogger("autosar-copilot")
+log = logging.getLogger("asrbrain")
 
 
 def log_stage(stage: str, **fields):

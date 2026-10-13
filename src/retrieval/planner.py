@@ -16,16 +16,17 @@ INTENT_MODALITIES = {
 
 def plan(query: str) -> dict:
     from .query_understanding import parse
+    from ..ingestion.metadata import word_hit
     p = parse(query)
     base = p.model_dump() if hasattr(p, "model_dump") else dict(p)
     intent = base.get("intent", "unknown")
     modalities = list(INTENT_MODALITIES.get(intent, INTENT_MODALITIES["unknown"]))
     ql = query.lower()
-    if any(w in ql for w in ("diagram", "figure", "path from", "communication path", "sequence")):
+    if any(word_hit(ql, w) for w in ("diagram", "diagrams", "figure", "figures", "path from", "communication path", "sequence")):
         for m in ("diagram", "graph"):
             if m not in modalities:
                 modalities.append(m)
-    if "table" in ql or "parameter" in ql or "container" in ql:
+    if any(word_hit(ql, w) for w in ("table", "tables", "parameter", "parameters", "container", "containers")):
         if "table" not in modalities:
             modalities.append("table")
     needs_graph = bool(base.get("needs_graph_search")) or intent in ("dependency", "deep_explanation")
