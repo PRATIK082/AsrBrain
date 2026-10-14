@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: AsrBrain community roadmap and prioritization
+    url: https://github.com/PRATIK082/AsrBrain/issues/4
+    about: Share the AUTOSAR engineering problems and workflows you want AsrBrain to support.
+  - name: Read the contribution guide
+    url: https://github.com/PRATIK082/AsrBrain/blob/main/CONTRIBUTING.md
+    about: Setup, testing, evaluation, and contribution boundaries.
