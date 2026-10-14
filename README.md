@@ -171,9 +171,13 @@ make docker-full       # + neo4j + redis + react frontend
 `/query` unchanged; v2 stores (`tables`, `figures`) are ignored, chunk IDs stable so no
 re-index is needed either way. Source PDFs are never baked into images.
 
-## Contributing / feedback
+## Contribute and shape the roadmap
 
-UI has 👍 / 🚨 buttons. To add a gold case: append a JSON line to
-`data/benchmarks/autosar_benchmark_v1.jsonl` (schema in `src/evaluation/datasets.py`),
-then `make eval`. See `docs/operations-guide.md`, `docs/troubleshooting.md`,
-`docs/migration-risk-register.md`.
+AsrBrain improves through reproducible bug reports, real AUTOSAR engineering questions, evaluation cases, and focused pull requests.
+
+- [Report a bug](https://github.com/PRATIK082/AsrBrain/issues/new?template=bug_report.yml)
+- [Propose a feature or requirement](https://github.com/PRATIK082/AsrBrain/issues/new?template=feature_request.yml)
+- [Read the contributing guide](https://github.com/PRATIK082/AsrBrain/blob/main/CONTRIBUTING.md)
+- [Browse existing issues](https://github.com/PRATIK082/AsrBrain/issues)
+
+The UI feedback controls are also useful for answer-quality reports. To contribute an evaluation case, add a JSON line to `data/benchmarks/autosar_benchmark_v1.jsonl` following the schema in `src/evaluation/datasets.py`, then run `make eval`. Use only synthetic, public, or appropriately licensed input data; do not upload proprietary AUTOSAR specification PDFs/text or customer material.
