@@ -178,6 +178,7 @@ AsrBrain improves through reproducible bug reports, real AUTOSAR engineering que
 - [Report a bug](https://github.com/PRATIK082/AsrBrain/issues/new?template=bug_report.yml)
 - [Propose a feature or requirement](https://github.com/PRATIK082/AsrBrain/issues/new?template=feature_request.yml)
 - [Read the contributing guide](https://github.com/PRATIK082/AsrBrain/blob/main/CONTRIBUTING.md)
+- [Community roadmap: help shape AsrBrain](https://github.com/PRATIK082/AsrBrain/issues/4)
 - [Browse existing issues](https://github.com/PRATIK082/AsrBrain/issues)
 
 The UI feedback controls are also useful for answer-quality reports. To contribute an evaluation case, add a JSON line to `data/benchmarks/autosar_benchmark_v1.jsonl` following the schema in `src/evaluation/datasets.py`, then run `make eval`. Use only synthetic, public, or appropriately licensed input data; do not upload proprietary AUTOSAR specification PDFs/text or customer material.
