@@ -1,4 +1,12 @@
-import type { ChatRequest, StreamEvent } from "./types";
+import type {
+  AssistantCapabilities,
+  ChatRequest,
+  DiagnoseResult,
+  ProjectOverview,
+  StarterPromptGroup,
+  StreamEvent,
+  TriageCategory,
+} from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -11,6 +19,9 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   conversations: () => json("/api/conversations"),
   createConversation: (title = "New conversation") => json("/api/conversations", { method: "POST", body: JSON.stringify({ title }) }),
+  deleteConversation: (id: string) => json(`/api/conversations/${id}`, { method: "DELETE" }),
+  renameConversation: (id: string, title: string) =>
+    json(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   chat: (req: ChatRequest) => json("/api/chat", { method: "POST", body: JSON.stringify(req) }),
   stop: (conversation_id: string) => json("/api/chat/stop", { method: "POST", body: JSON.stringify({ conversation_id }) }),
   feedback: (conversation_id: string, message_idx: number, rating: string, note = "") =>
@@ -31,6 +42,23 @@ export const api = {
     json("/api/code/sarif", { method: "POST", body: JSON.stringify({ sarif }) }),
   diagramAnalyze: (image_path: string, caption = "", page = 0, document_id = "") =>
     json("/api/diagrams/analyze", { method: "POST", body: JSON.stringify({ image_path, caption, page, document_id }) }),
+
+  /* ---------------- institutional assistant ---------------- */
+
+  assistantCapabilities: () => json<AssistantCapabilities>("/api/assistant/capabilities"),
+  assistantOverview: () => json<ProjectOverview>("/api/assistant/overview"),
+  assistantPrompts: () => json<{ groups: StarterPromptGroup[] }>("/api/assistant/prompts"),
+  assistantTriageCategories: () => json<{ categories: TriageCategory[] }>("/api/assistant/triage/categories"),
+  assistantDiagnose: (body: {
+    symptom: string;
+    code?: string;
+    module?: string;
+    release?: string;
+    provider?: string;
+    model?: string;
+    base_url?: string;
+    api_key?: string;
+  }) => json<DiagnoseResult>("/api/assistant/diagnose", { method: "POST", body: JSON.stringify(body) }),
 };
 
 /** SSE reader for POST /api/chat/stream — yields parsed StreamEvents. */

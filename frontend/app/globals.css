@@ -1,0 +1,284 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Design tokens
+   The product ships two institutional themes. `data-theme` on <html> selects
+   one; every component reads semantic tokens instead of raw hex values.
+   --------------------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  --ink-950: 5 7 12;
+  --ink-900: 7 10 15;
+  --ink-850: 10 14 23;
+  --ink-800: 13 19 32;
+  --ink-700: 18 24 36;
+  --ink-600: 27 36 54;
+  --edge: 34 45 63;
+  --fg: 241 245 249;
+  --muted: 148 163 184;
+  --faint: 100 116 139;
+  --accent: 0 245 255;
+  --accent-2: 167 139 250;
+  --warn: 245 158 11;
+  --good: 34 197 94;
+  --bad: 239 68 68;
+  --surface: 10 14 23;
+  --surface-raised: 13 19 32;
+  --shadow: 0 0 0;
+}
+
+[data-theme="light"] {
+  --ink-950: 255 255 255;
+  --ink-900: 250 251 253;
+  --ink-850: 244 246 250;
+  --ink-800: 255 255 255;
+  --ink-700: 241 244 249;
+  --ink-600: 232 236 243;
+  --edge: 210 218 230;
+  --fg: 15 23 42;
+  --muted: 71 85 105;
+  --faint: 100 116 139;
+  --accent: 0 138 158;
+  --accent-2: 109 40 217;
+  --warn: 180 83 9;
+  --good: 21 128 61;
+  --bad: 190 30 30;
+  --surface: 255 255 255;
+  --surface-raised: 250 251 253;
+  --shadow: 15 23 42;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--edge) / 0.7);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: rgb(var(--ink-900));
+    color: rgb(var(--fg));
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.28);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent) / 0.75);
+    outline-offset: 2px;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+@layer components {
+  /* ---- surfaces -------------------------------------------------------- */
+  .panel {
+    @apply rounded-xl border border-edge/70 bg-ink-850/80 shadow-panel backdrop-blur-sm;
+  }
+
+  .panel-flat {
+    @apply rounded-xl border border-edge/60 bg-ink-800/60;
+  }
+
+  /* ---- buttons --------------------------------------------------------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-lg border border-edge/80
+      bg-ink-800/70 px-3 py-1.5 text-sm text-fg/90 transition-colors
+      hover:border-accent/50 hover:bg-ink-700/70 hover:text-fg
+      disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-edge/80 disabled:hover:bg-ink-800/70;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-accent text-ink-950 font-semibold hover:bg-accent/90 hover:text-ink-950;
+  }
+
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:border-edge/70 hover:bg-ink-800/60;
+  }
+
+  .btn-icon {
+    @apply h-8 w-8 shrink-0 rounded-lg p-0;
+  }
+
+  .btn-xs {
+    @apply px-2 py-0.5 text-xs;
+  }
+
+  /* ---- form controls --------------------------------------------------- */
+  .input {
+    @apply w-full rounded-lg border border-edge/70 bg-ink-900/70 px-3 py-2 text-sm text-fg
+      placeholder:text-faint/70 focus:border-accent/60 focus:outline-none;
+  }
+
+  .select {
+    @apply rounded-lg border border-edge/70 bg-ink-900/70 px-2 py-1.5 text-xs text-fg
+      focus:border-accent/60 focus:outline-none;
+  }
+
+  /* ---- chips / badges -------------------------------------------------- */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-edge/70 bg-ink-800/70
+      px-2.5 py-1 text-xs text-muted transition-colors hover:border-accent/50 hover:text-fg;
+  }
+
+  .chip-active {
+    @apply border-accent/60 bg-accent/10 text-accent;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-md border border-edge/60 bg-ink-800/80 px-1.5 py-0.5
+      font-mono text-2xs uppercase tracking-wide text-muted;
+  }
+
+  .badge-good {
+    @apply border-good/40 bg-good/10 text-good;
+  }
+
+  .badge-warn {
+    @apply border-warn/40 bg-warn/10 text-warn;
+  }
+
+  .badge-bad {
+    @apply border-bad/40 bg-bad/10 text-bad;
+  }
+
+  .badge-accent {
+    @apply border-accent/40 bg-accent/10 text-accent;
+  }
+
+  /* ---- markdown (answer bodies) ---------------------------------------- */
+  .md {
+    @apply text-[15px] leading-7 text-fg/90;
+  }
+
+  .md > * + * {
+    @apply mt-4;
+  }
+
+  .md h1 {
+    @apply mt-6 text-xl font-semibold text-fg;
+  }
+
+  .md h2 {
+    @apply mt-6 border-b border-edge/60 pb-1.5 text-lg font-semibold text-fg;
+  }
+
+  .md h3 {
+    @apply mt-5 text-base font-semibold text-fg;
+  }
+
+  .md h4 {
+    @apply mt-4 text-sm font-semibold uppercase tracking-wide text-muted;
+  }
+
+  .md p {
+    @apply text-fg/90;
+  }
+
+  .md ul {
+    @apply list-disc space-y-1.5 pl-6 marker:text-accent/70;
+  }
+
+  .md ol {
+    @apply list-decimal space-y-1.5 pl-6 marker:text-muted;
+  }
+
+  .md a {
+    @apply text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent;
+  }
+
+  .md strong {
+    @apply font-semibold text-fg;
+  }
+
+  .md blockquote {
+    @apply border-l-2 border-accent/50 bg-ink-800/40 py-1 pl-4 pr-3 italic text-muted;
+  }
+
+  .md hr {
+    @apply border-edge/60;
+  }
+
+  .md :not(pre) > code {
+    @apply rounded bg-ink-700/70 px-1.5 py-0.5 font-mono text-[13px] text-accent;
+  }
+
+  .md table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .md thead {
+    @apply bg-ink-800/70;
+  }
+
+  .md th {
+    @apply border-b border-edge/70 px-3 py-2 text-left font-semibold text-fg;
+  }
+
+  .md td {
+    @apply border-b border-edge/40 px-3 py-2 align-top text-fg/85;
+  }
+
+  .md tbody tr:hover {
+    @apply bg-ink-800/40;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--edge)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--edge));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--faint));
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .grid-lines {
+    background-image:
+      linear-gradient(rgb(var(--edge) / 0.28) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--edge) / 0.28) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+}

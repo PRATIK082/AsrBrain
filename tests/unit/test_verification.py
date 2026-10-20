@@ -21,3 +21,15 @@ def test_empty_evidence_abstains():
     v = verify("Nothing [E1].", [], {})
     c = confidence_score(0.0, [], v, {})
     assert c["should_abstain"] is True
+
+
+def test_short_cited_claim_is_supported():
+    # A concise but properly cited answer must not be treated as unsupported.
+    v = verify("Yes [E1].", [_ev()], {})
+    assert v["claim_support_rate"] == 1.0
+    assert v["citation_coverage"] == 1.0
+
+
+def test_short_uncited_claim_is_still_dropped():
+    v = verify("Yes.", [_ev()], {})
+    assert v["claim_support_rate"] == 0.0

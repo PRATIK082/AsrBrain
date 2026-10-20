@@ -21,7 +21,8 @@ automatically. Every factual claim carries a source citation (PDF + pages + requ
 ## UI view — chatbox at a glance
 
 Streamlit (`apps/streamlit/app.py`, wide layout, dark/light themes) and the React
-skeleton (`frontend/app/page.tsx`, same `/api/` SSE contract) share one look:
+assistant UI (`frontend/app/page.tsx` → `components/assistant/AssistantShell.tsx`, same
+`/api/` SSE contract) share one look:
 
 ```
 ┌─────────────┬───────────────────────────────────────────────────┐
@@ -108,6 +109,54 @@ identifiers, versions, and citations are never rewritten) with an “Interpreted
   `GET /api/conversations/{id}/export` + `POST /api/conversations/import`. The index itself
   stays on disk (`data/indexes/`) — sessions never trigger re-ingest.
 
+## Institutional assistant UI (React)
+
+`frontend/` is no longer a skeleton — it is the institutional assistant surface:
+a ChatGPT/Copilot/Claude-class shell over the same `/api/` contract.
+
+```
+┌──────────────┬────────────────────────────────────────┬───────────────┐
+│  Sidebar     │  Scope: mode · provider · release/module │  Knowledge    │
+│  surfaces    ├────────────────────────────────────────┤  Corpus stats │
+│  conversation│  Thread: answer · confidence · steps ·   │  Concept flow │
+│  search      │  sources · follow-ups                    │  Anchors      │
+│  rename/del  ├────────────────────────────────────────┤  Guarantees   │
+│  disclaimer  │  Composer: ask | diagnose                │               │
+└──────────────┴────────────────────────────────────────┴───────────────┘
+```
+
+* **Ask** — cited answers, the 10 backend stages shown as a timeline, every source
+  expandable (document, page, section, requirement IDs, snippet).
+* **Diagnose** — a reported symptom is classified into one of 9 failure families
+  (`signal_not_transmitted`, `timeout`, `port_connection`, `state_machine`,
+  `initialisation`, `configuration`, `api_mismatch`, `diagnostic`, `general`) and
+  returns **likely causes**, **checks to run** and **candidate fixes** — every one of
+  them cited to a page of the indexed specification. Fully deterministic: no model
+  needed.
+* **Knowledge panel** — corpus statistics, the concept flow (module → requirement → API
+  with source and page) and the most-referenced requirements/APIs of this project.
+* **Starter prompts** — grouped questions templated with the real module and release
+  names of the indexed corpus.
+
+New backend package `src/assistant/` (read-only, model-free) plus:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/assistant/capabilities` | what the assistant knows and can do |
+| `GET /api/assistant/overview` | modules, releases, documents, concept flow, entity anchors |
+| `GET /api/assistant/prompts` | `{"groups": [...]}` — the starter-prompt library |
+| `GET /api/assistant/triage/categories` | `{"categories": [...]}` — the symptom taxonomy |
+| `POST /api/assistant/diagnose` | evidence-grounded triage (deterministic without a provider) |
+
+`/api/chat` and `/api/chat/stream` now persist the per-turn evidence in the message
+meta, so the source panel survives a reload.
+
+> The React UI had `tailwindcss` in `devDependencies` but no `tailwind.config.js`,
+> `postcss.config.js` or `app/globals.css` — every utility class was inert. The
+> pipeline is now wired and the design tokens live in `frontend/app/globals.css`.
+
+Design and rationale: `docs/institutional-assistant-ui-plan.md`.
+
 ## Architecture
 
 ```
@@ -136,12 +185,13 @@ Streamlit + Ollama. Phase 2 adds OpenSearch; Phase 3 adds Neo4j/graph + Qdrant m
 |---|---|
 | `apps/api/main.py` | FastAPI: legacy `/query /ingest /evaluate` + chat contract `/api/conversations /api/chat /api/chat/stream /api/chat/stop /api/documents /api/sources /api/feedback /api/models /api/releases /api/modules` |
 | `apps/streamlit/app.py` | Chatbox UI: conversation sidebar (new/search/rename/delete), chat history, streaming, regenerate/edit/stop, clarification chips, citation cards, evidence/trace/graph tabs, upload, export |
-| `frontend/` | React/Next.js skeleton (same `/api/` contract, SSE streaming, zustand settings) — `full` Compose profile |
+| `frontend/` | React/Next.js institutional assistant UI (sidebar · scope bar · cited thread · knowledge panel · ARXML/diff/code workbenches) — same `/api/` contract, SSE streaming, zustand settings — `full` Compose profile |
 | `src/ingestion/` | `pipeline.py` (+tables/figures stores), `parsers.py` (Docling/PyMuPDF/pypdf adapters + quality routing), `pdf_extract.py`, `chunking.py`, `metadata.py`, `parser_adapter.py` + `processors.py` (merged multimodal adapters) |
 | `src/schema/` | `documents.py`, `queries.py`, `graph.py` (+confidence/is_inferred), `multimodal.py` (MultimodalEvidence), `canonical.py` + `multimodal_graph.py` (merged multimodal model) |
 | `src/retrieval/` | `query_understanding.py`, `clarify.py` (slot-fill), `modalities.py` (req/API/ECUC/table/figure), `fusion.py`, `reranking.py`, `context.py`, `pipeline.py`, `graph.py`, `planner.py` + `modality_fusion.py` + `context_rules.py` (merged) |
 | `src/generation/` | `providers.py` (Ollama + OpenAI-compat cloud, streaming), `prompts.py` (per-mode formats), `answer.py`, `citations.py`, `verification.py`, `routing.py` (merged multimodal routing) |
 | `src/workflows/` | `router.py` (legacy path), `stages.py` (SSE staged events + cancel) |
+| `src/assistant/` | `knowledge.py` (corpus manifest, capabilities, project overview, concept flow, starter prompts) + `triage.py` (9-family symptom classification, cited causes/checks/fixes) — read-only and model-free |
 | `src/chat/store.py` | Conversations/messages/slots/feedback SQLite |
 
 ## Benchmark (measured, 2026-09-29)

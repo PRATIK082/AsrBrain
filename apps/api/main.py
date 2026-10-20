@@ -218,9 +218,12 @@ def api_chat(req: ChatRequest):
         _store.add_message(cid, "assistant", clarify["question"], {"clarify": clarify.get("missing", [])})
         return {"conversation_id": cid, "needs_clarification": True, **clarify}
     answer = (final or {}).get("answer", "")
+    evidence = [e for e in events if e.get("event") == "evidence"]
     _store.add_message(cid, "assistant", answer,
                        {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", ""),
                         "plan": (final or {}).get("plan", {}),
+                        "graph": (final or {}).get("graph", []),
+                        "evidence": evidence,
                         "followups": (final or {}).get("followups", [])})
     return {"conversation_id": cid, "needs_clarification": False, **(final or {})}
 
@@ -241,6 +244,7 @@ def api_chat_stream(req: ChatRequest):
     def gen():
         answer_parts: list[str] = []
         last: dict = {}
+        evidence: list[dict] = []
         for ev in run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior):
             if _cancel.get(cid):
                 ev = {"event": "status", "stage": "cancelled", "message": "stopped"}
@@ -248,6 +252,8 @@ def api_chat_stream(req: ChatRequest):
                 break
             if ev.get("event") == "token":
                 answer_parts.append(ev.get("text", ""))
+            if ev.get("event") == "evidence":
+                evidence.append(ev)
             if ev.get("event") == "complete":
                 last = ev
             yield f"data: {json.dumps(ev)}\n\n"
@@ -255,6 +261,7 @@ def api_chat_stream(req: ChatRequest):
             _store.add_message(cid, "assistant", last["answer"],
                                {"trace": last.get("trace", {}), "llm": last.get("llm", ""),
                                 "plan": last.get("plan", {}), "graph": last.get("graph", []),
+                                "evidence": evidence,
                                 "followups": last.get("followups", [])})
         elif answer_parts:
             _store.add_message(cid, "assistant", "".join(answer_parts), {"partial": True})
@@ -623,3 +630,66 @@ def api_sources_reindex(source_id: str):
 def api_tokens_get():
     from src.config.settings import TOKEN_CAPS
     return {"caps": dict(TOKEN_CAPS), "file": "config/generation.yaml"}
+
+
+# ---------------- Institutional assistant ----------------
+
+class DiagnoseRequest(BaseModel):
+    symptom: str
+    code: str = ""
+    module: str = ""
+    release: str = ""
+    provider: str = ""              # empty -> deterministic triage
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+@app.get("/api/assistant/capabilities")
+def api_assistant_capabilities():
+    """What the assistant knows and can do (derived from the canonical store)."""
+    from src.assistant import capabilities
+    return capabilities()
+
+
+@app.get("/api/assistant/overview")
+def api_assistant_overview():
+    """Project knowledge overview: modules, releases, documents, concept flow."""
+    from src.assistant import project_overview
+    return project_overview()
+
+
+@app.get("/api/assistant/prompts")
+def api_assistant_prompts():
+    """Curated starter-prompt library for the empty state."""
+    from src.assistant import starter_prompts
+    return {"groups": starter_prompts()}
+
+
+@app.get("/api/assistant/triage/categories")
+def api_assistant_triage_categories():
+    """Symptom taxonomy used by the troubleshooting surface."""
+    from src.assistant import triage_categories
+    return {"categories": triage_categories()}
+
+
+@app.post("/api/assistant/diagnose")
+def api_assistant_diagnose(req: DiagnoseRequest):
+    """Evidence-grounded triage of a reported symptom."""
+    from src.assistant import diagnose
+    spec = None
+    if req.provider:
+        if req.provider == "openai_compat":
+            spec = ProviderSpec(kind="openai_compat", model=req.model or "gpt-4o-mini",
+                                 base_url=req.base_url or "https://api.openai.com/v1",
+                                 api_key=req.api_key, timeout_s=settings.ollama_timeout_s)
+        elif req.provider == "ollama":
+            from src.generation.answer import pick_model
+            spec = ProviderSpec(kind="ollama", model=req.model or pick_model(),
+                                 base_url=req.base_url or settings.ollama_base_url,
+                                 timeout_s=settings.ollama_timeout_s)
+    try:
+        return diagnose(req.symptom, code=req.code, module=req.module,
+                        release=req.release, spec=spec, pipe=get_pipe())
+    except Exception as e:
+        raise HTTPException(500, f"diagnosis failed: {e}")
