@@ -8,8 +8,12 @@ import { useAsrStream } from "../hooks/useAsrStream";
 import { ChatMessage } from "../components/chat/ChatMessage";
 import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
 import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
+import { MindmapView } from "../components/graph/MindmapView";
+import { GraphExplorer } from "../components/graph/GraphExplorer";
+import { AgentRunner } from "../components/agent/AgentRunner";
+import { ToolCatalogue } from "../components/agent/ToolCatalogue";
 
-type Tab = "chat" | "arxml" | "diff" | "code";
+type Tab = "chat" | "arxml" | "diff" | "code" | "graph" | "agent";
 
 function ChatPane() {
   const [input, setInput] = useState("");
@@ -225,18 +229,59 @@ function CodePane() {
 
 export default function EngineeringPage() {
   const [tab, setTab] = useState<Tab>("chat");
+  const labels: Record<Tab, string> = {
+    chat: "💬 Chat",
+    arxml: "🧩 ARXML Explorer",
+    diff: "🔀 Diff Studio",
+    code: "🔍 Code Review",
+    graph: "🕸️ GraphRAG Explorer",
+    agent: "🤖 Agent Workflows",
+  };
   return (
     <main className="flex h-screen">
       <aside className="w-64 border-r p-4">
         <h1 className="font-bold">AsrBrain</h1>
-        {(["chat", "arxml", "diff", "code"] as Tab[]).map((t) => (
+        {(Object.keys(labels) as Tab[]).map((t) => (
           <button key={t} className={`mt-2 w-full rounded border p-2 text-left ${tab === t ? "bg-black text-white" : ""}`} onClick={() => setTab(t)}>
-            {t === "chat" ? "💬 Chat" : t === "arxml" ? "🧩 ARXML Explorer" : t === "diff" ? "🔀 Diff Studio" : "🔍 Code Review"}
+            {labels[t]}
           </button>
         ))}
         <p className="mt-4 text-xs text-gray-500">Processed locally unless approved policy shows otherwise. No chain-of-thought displayed.</p>
       </aside>
-      {tab === "chat" ? <ChatPane /> : tab === "arxml" ? <ArxmlPane /> : tab === "diff" ? <DiffPane /> : <CodePane />}
+      {tab === "chat" && <ChatPane />}
+      {tab === "arxml" && <ArxmlPane />}
+      {tab === "diff" && <DiffPane />}
+      {tab === "code" && <CodePane />}
+      {tab === "graph" && (
+        <section className="flex-1 space-y-6 overflow-y-auto p-6">
+          <div>
+            <h2 className="font-bold">GraphRAG Explorer (local · global · hybrid retrieval)</h2>
+            <p className="text-xs text-gray-500">
+              Entity neighbourhoods, community summaries and relation traces from the local knowledge graph.
+            </p>
+          </div>
+          <GraphExplorer />
+          <div className="space-y-2">
+            <h3 className="font-bold">Mindmap Builder</h3>
+            <MindmapView topic="CanIf" />
+          </div>
+        </section>
+      )}
+      {tab === "agent" && (
+        <section className="flex-1 space-y-6 overflow-y-auto p-6">
+          <div>
+            <h2 className="font-bold">Agentic Workflows (bounded, deterministic tools only)</h2>
+            <p className="text-xs text-gray-500">
+              Each workflow calls a fixed tool plan; every answer stays anchored to the retrieved evidence.
+            </p>
+          </div>
+          <AgentRunner />
+          <div className="space-y-2">
+            <h3 className="font-bold">Tool Catalogue</h3>
+            <ToolCatalogue />
+          </div>
+        </section>
+      )}
     </main>
   );
 }

@@ -59,6 +59,7 @@ class Settings:
     final_evidence: int = field(default_factory=lambda: int(_get("FINAL_EVIDENCE", "12")))
     rrf_k: int = field(default_factory=lambda: int(_get("RRF_K", "60")))
     canonical_db: str = field(default_factory=lambda: _get("CANONICAL_DB", "data/canonical/canonical.db"))
+    graph_db: str = field(default_factory=lambda: _get("GRAPH_DB_PATH", "data/graph/graph.db"))
     pdf_dir: str = field(default_factory=lambda: _get("PDF_DIR", "pdf"))
     qdrant_url: str = field(default_factory=lambda: _get("QDRANT_URL", "http://localhost:6333"))
     qdrant_collection: str = field(default_factory=lambda: _get("QDRANT_COLLECTION", "autosar_chunks"))

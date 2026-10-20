@@ -122,8 +122,13 @@ pdf/*.pdf → ingestion (parser adapters: Docling-opt → PyMuPDF → pypdf; tab
               extractive fallback) → verifier → confidence/abstain
             → FastAPI chat contract (/api/chat, /stream SSE, conversations, documents,
               sources+page preview, feedback, models/releases/modules) + legacy /query
+              + tooling contract (/api/tools, /api/mindmap, /api/graph/*, /api/agent/*)
             → Streamlit Chatbox UI (conversations, streaming, chips, evidence/trace/graph
               panels, upload, export) · React skeleton in frontend/ (same contract)
+
+side-path: canonical.db + C code + ARXML → knowledge graph (src/graphrag) → tools
+(src/tools) → bounded agent workflows (src/agents) → /api/agent/*, GraphRAG + Agent
+tabs in frontend/
 ```
 
 Phasing (spec §7): Phase 1 (this repo, default) = SQLite canonical + local hybrid + FastAPI +
@@ -134,7 +139,7 @@ Streamlit + Ollama. Phase 2 adds OpenSearch; Phase 3 adds Neo4j/graph + Qdrant m
 
 | Path | Content |
 |---|---|
-| `apps/api/main.py` | FastAPI: legacy `/query /ingest /evaluate` + chat contract `/api/conversations /api/chat /api/chat/stream /api/chat/stop /api/documents /api/sources /api/feedback /api/models /api/releases /api/modules` |
+| `apps/api/main.py` | FastAPI: legacy `/query /ingest /evaluate` + chat contract `/api/conversations /api/chat /api/chat/stream /api/chat/stop /api/documents /api/sources /api/feedback /api/models /api/releases /api/modules` + tooling contract `/api/tools /api/mindmap /api/graph/* /api/agent/*` |
 | `apps/streamlit/app.py` | Chatbox UI: conversation sidebar (new/search/rename/delete), chat history, streaming, regenerate/edit/stop, clarification chips, citation cards, evidence/trace/graph tabs, upload, export |
 | `frontend/` | React/Next.js skeleton (same `/api/` contract, SSE streaming, zustand settings) — `full` Compose profile |
 | `src/ingestion/` | `pipeline.py` (+tables/figures stores), `parsers.py` (Docling/PyMuPDF/pypdf adapters + quality routing), `pdf_extract.py`, `chunking.py`, `metadata.py`, `parser_adapter.py` + `processors.py` (merged multimodal adapters) |
@@ -143,6 +148,72 @@ Streamlit + Ollama. Phase 2 adds OpenSearch; Phase 3 adds Neo4j/graph + Qdrant m
 | `src/generation/` | `providers.py` (Ollama + OpenAI-compat cloud, streaming), `prompts.py` (per-mode formats), `answer.py`, `citations.py`, `verification.py`, `routing.py` (merged multimodal routing) |
 | `src/workflows/` | `router.py` (legacy path), `stages.py` (SSE staged events + cancel) |
 | `src/chat/store.py` | Conversations/messages/slots/feedback SQLite |
+| `src/graphrag/` | Knowledge graph for GraphRAG: `store.py` (SQLite `kg_nodes`/`kg_edges`/`kg_communities`/`trace_links`), `extractor.py` (deterministic entities/relations from chunks, C code, tests), `builder.py` (`python -m src.graphrag`), `community.py` (label-propagation communities), `retrieval.py` (local / global / hybrid search), `runtime.py` (shared store singleton) |
+| `src/tools/` | Tool framework: `base.py` (`ToolSpec`/`ToolResult`/`ToolRegistry`), `registry.py` (the 22 shipped tools), `graphrag.py`, `mindmap.py`, `arxml.py`, `code.py`, `traceability.py`, `cli.py` (`python -m src.tools.cli`) |
+| `src/agents/` | Agentic layer: `planner.py` (deterministic + LLM planning, intent detection), `executor.py` (bounded tool loop with citations), `workflows.py` (4 named workflows), `runner.py` (workflow runner + SSE events) |
+
+## GraphRAG, tools & agentic workflows
+
+Beyond plain RAG, the repo can build a **knowledge graph** over the same canonical
+store and answer with it. The graph mixes four worlds that the text index keeps
+apart: AUTOSAR **requirements** ↔ **APIs/ECUC values** (from the specs), **ARXML**
+components/ports/interfaces/runnables, **C code** functions and RTE call sites, and
+**test cases** — with explicit, inspectable traceability links between them.
+
+```
+canonical.db + C sources + ARXML
+        │  deterministic extraction (src/graphrag/extractor.py)
+        ▼
+   knowledge graph  (kg_nodes / kg_edges / kg_communities / trace_links)
+        │  local search (neighbourhood) + global search (community summaries)
+        ▼
+    tools  (graph.*, mindmap.*, arxml.*, code.*, trace.*)
+        │  bounded agent loop (src/agents) — deterministic plan, cited answer
+        ▼
+  4 workflows: arxml_requirement_trace · code_requirement_trace · impact_analysis · deep_explanation
+```
+
+**Build and explore**
+
+```bash
+make graph-build CODE_DIRS="src"        # canonical.db + C code → data/graph/graph.db
+make graph-stats                        # node / edge / community / trace-link counts
+make graph-query QUERY="CanIf init" MODE=hybrid
+make tools                              # list every tool with its JSON schema
+make mindmap TOPIC=CanIf SOURCE=graph   # Mermaid mindmap on stdout
+make agent QUERY="which tests cover SWS_CanIf_00123" WORKFLOW=auto
+```
+
+**REST surface** (same contract as the chat API, all under `/api`)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/tools` | Tool catalogue: name, description, JSON-Schema, tags, mutating flag |
+| `POST /api/tools/{name}` | Invoke one tool (`{"args": {...}, "allow_mutating": false}`) |
+| `POST /api/mindmap` | Mermaid mindmap from the graph, from evidence or from an outline |
+| `POST /api/graph/build` | Rebuild the graph (mutating: needs `allow_mutating`) |
+| `GET /api/graph/stats` | Graph counters + store path |
+| `POST /api/graph/query` | `mode` = `local` \| `global` \| `hybrid` search |
+| `GET /api/graph/node/{node_id}` | One node plus its neighbourhood subgraph |
+| `GET /api/agent/workflows` | The named workflows and their fixed tool plans |
+| `POST /api/agent/run` | Run a workflow → answer, citations, observations, plan |
+| `POST /api/agent/stream` | Same, as SSE (`workflow`, `plan`, `tool_call`, `tool_result`, `complete`) |
+
+The React UI has two new tabs — **GraphRAG Explorer** (graph stats, search, entity
+browser, communities, mindmap) and **Agent Workflows** (workflow runner + tool
+catalogue) — in `frontend/components/graph/` and `frontend/components/agent/`.
+
+**Safety rules that the agent layer enforces** (see `docs/featureupdate.md` §20):
+
+- the *plan* is deterministic by default; a model may only re-order or trim it,
+- a tool can never invent document metadata — it only reports what the graph holds,
+- only `graph.build` may mutate, and only when `allow_mutating` is explicitly granted,
+- every answer is built from tool observations with `[G<n>]` citations; when the model
+  is unavailable a deterministic digest is produced instead,
+- a workflow that finds nothing says so instead of filling the gap with general knowledge.
+
+Design rationale, the node/edge vocabulary and the acceptance criteria are in
+`docs/agentic-graphrag-tooling-plan.md`.
 
 ## Benchmark (measured, 2026-09-29)
 

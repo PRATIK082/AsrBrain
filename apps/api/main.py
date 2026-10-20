@@ -408,7 +408,7 @@ def api_modules():
 # ARXML parsed deterministically first; RAG only explains. All endpoints server-enforce
 # tenant scope; cloud routing is policy-driven; code findings are advisory-only.
 
-_ARXML_STORE: dict = {}  # artifact_id -> {topology, graph} (replace with object store per tenant)
+_ARXML_STORE: dict = {}  # deprecated: use src.ingestion.arxml.runtime (shared with the agent tools)
 
 
 def _ctx_from_headers(tenant: str = "default", user: str = "local-operator",
@@ -446,6 +446,8 @@ async def api_arxml_upload(file: UploadFile = File(...), tenant: str = "default"
     risk = classify_content(data.decode("utf-8", "ignore")[:20000], file.filename or "")
     topo = parse_arxml(tmp, tenant_id=tenant, project_scope=project)
     graph = export_graph(topo)
+    from src.ingestion.arxml import runtime as ar_runtime
+    ar_runtime.put_artifact(topo, graph)
     _ARXML_STORE[topo.artifact.artifact_id] = {"topology": topo, "graph": graph}
     return {"artifact_id": topo.artifact.artifact_id, "classification": risk.classification,
             "route": "local", "components": len(topo.components), "ports": len(topo.ports),
@@ -455,10 +457,8 @@ async def api_arxml_upload(file: UploadFile = File(...), tenant: str = "default"
 
 @app.get("/api/arxml/artifacts")
 def api_arxml_list(tenant: str = "default"):
-    return [{"artifact_id": k, "source": v["topology"].artifact.source_path,
-             "tenant_id": v["topology"].artifact.tenant_id,
-             "components": len(v["topology"].components)}
-            for k, v in _ARXML_STORE.items() if v["topology"].artifact.tenant_id == tenant]
+    from src.ingestion.arxml import runtime as ar_runtime
+    return ar_runtime.list_artifacts(tenant)
 
 
 @app.get("/api/arxml/topology")
@@ -623,3 +623,235 @@ def api_sources_reindex(source_id: str):
 def api_tokens_get():
     from src.config.settings import TOKEN_CAPS
     return {"caps": dict(TOKEN_CAPS), "file": "config/generation.yaml"}
+
+
+# ============================ GraphRAG + agentic tooling ============================
+# The tool registry is the single source of truth for what the UI, the REST API and
+# the agent loop can call.  Mutating tools (graph.build) must be opted into
+# explicitly by the caller.
+
+from src.tools.base import REGISTRY as _TOOL_REGISTRY          # noqa: E402
+from src.tools.registry import install as _install_tools        # noqa: E402
+
+_install_tools()
+
+
+def _tools():
+    return _TOOL_REGISTRY
+
+
+def _agent_spec(provider: str = "ollama", model: str = "", base_url: str = "",
+                api_key: str = "") -> ProviderSpec | None:
+    """Provider spec for the agent loop; None when no model should be used."""
+    if provider == "openai_compat":
+        return ProviderSpec(kind="openai_compat", model=model or "gpt-4o-mini",
+                            base_url=base_url or "https://api.openai.com/v1",
+                            api_key=api_key, timeout_s=settings.ollama_timeout_s)
+    if provider == "none":
+        return None
+    from src.generation.answer import pick_model
+    return ProviderSpec(kind="ollama", model=model or pick_model(),
+                        base_url=base_url or settings.ollama_base_url,
+                        timeout_s=settings.ollama_timeout_s)
+
+
+class ToolInvokeRequest(BaseModel):
+    args: dict = {}
+    allow_mutating: bool = False
+
+
+class MindmapRequest(BaseModel):
+    topic: str
+    source: str = "auto"          # auto | graph | evidence | outline
+    depth: int = 2
+    outline: list[dict] | None = None
+
+
+class GraphBuildRequest(BaseModel):
+    canonical_db: str = ""
+    code_dirs: list[str] = []
+    clear: bool = True
+
+
+class GraphQueryRequest(BaseModel):
+    query: str
+    mode: str = "hybrid"          # local | global | hybrid
+    depth: int = 2
+    limit: int = 25
+
+
+class AgentRunRequest(BaseModel):
+    query: str
+    workflow: str = ""             # empty -> auto route
+    mode: str = "workflow"         # workflow | auto | freeform
+    context: dict = {}
+    provider: str = "none"         # none (deterministic) | ollama | openai_compat
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    allow_mutating: bool = False
+    max_steps: int = 8
+
+
+@app.get("/api/tools")
+def api_tools_list():
+    """Every callable tool with its JSON-Schema (also the agent's tool catalogue)."""
+    reg = _tools()
+    return {"tools": reg.list(), "count": len(reg.names()), "names": reg.names()}
+
+
+@app.post("/api/tools/{name}")
+def api_tools_invoke(name: str, req: ToolInvokeRequest):
+    """Invoke one tool directly (same surface the agent uses)."""
+    reg = _tools()
+    spec = reg.get(name)
+    if spec is None:
+        raise HTTPException(404, f"unknown tool: {name}")
+    if spec.mutating and not req.allow_mutating:
+        raise HTTPException(403, f"tool '{name}' mutates the index; set allow_mutating=true")
+    result = reg.invoke(name, req.args or {})
+    if not result.ok:
+        return {"ok": False, "error": result.error, "tool": name,
+                "duration_ms": result.duration_ms}
+    return {"ok": True, "tool": name, "data": result.data,
+            "duration_ms": result.duration_ms}
+
+
+@app.post("/api/mindmap")
+def api_mindmap(req: MindmapRequest):
+    """Mermaid mindmap for a topic (graph, evidence or an explicit outline)."""
+    from src.graphrag.runtime import get_store
+    from src.tools.mindmap import build_mindmap
+    if not req.topic.strip():
+        raise HTTPException(400, "topic is required")
+    try:
+        data = build_mindmap(topic=req.topic, source=req.source, store=get_store(),
+                             outline=req.outline, depth=req.depth)
+    except Exception as e:
+        raise HTTPException(500, f"mindmap failed: {e}")
+    return data
+
+
+@app.post("/api/graph/build")
+def api_graph_build(req: GraphBuildRequest):
+    """(Re)build the knowledge graph from the canonical store and code folders."""
+    from src.graphrag.runtime import get_store
+    from src.graphrag.builder import build_graph
+    from src.indexing.hybrid import load_chunks
+    try:
+        chunks = load_chunks(req.canonical_db or settings.canonical_db)
+        if not chunks:
+            raise HTTPException(503, f"canonical store empty at "
+                                      f"{req.canonical_db or settings.canonical_db}")
+        store = get_store()
+        stats = build_graph(store, chunks, code_roots=list(req.code_dirs or []),
+                            clear=req.clear)
+        return {"built": True, **stats}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"graph build failed: {e}")
+
+
+@app.get("/api/graph/stats")
+def api_graph_stats():
+    from src.graphrag.runtime import get_store
+    return get_store().stats()
+
+
+@app.post("/api/graph/query")
+def api_graph_query(req: GraphQueryRequest):
+    """GraphRAG retrieval: local neighbourhood, global communities or hybrid."""
+    from src.graphrag.runtime import get_store
+    from src.graphrag.retrieval import global_search, hybrid_search, local_search
+    store = get_store()
+    if req.mode == "local":
+        res = local_search(store, req.query, depth=req.depth, limit=req.limit)
+    elif req.mode == "global":
+        res = global_search(store, req.query, limit=req.limit)
+    else:
+        res = hybrid_search(store, req.query, depth=req.depth, local_limit=req.limit)
+    res["stats"] = store.stats()
+    return res
+
+
+@app.get("/api/graph/node/{node_id:path}")
+def api_graph_node(node_id: str, depth: int = 1, limit: int = 120):
+    """One knowledge-graph node with its neighbourhood."""
+    from src.graphrag.runtime import get_store
+    store = get_store()
+    node = store.get_node(node_id)
+    if not node:
+        row = store.conn.execute(
+            "SELECT node_id FROM kg_nodes WHERE label = ? ORDER BY degree DESC LIMIT 1",
+            (node_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "node not found")
+        node_id = row["node_id"]
+        node = store.get_node(node_id)
+    sub = store.neighbors(node_id, depth=depth, limit=limit)
+    return {"node": node, **sub}
+
+
+@app.get("/api/agent/workflows")
+def api_agent_workflows():
+    from src.agents.workflows import list_workflows
+    return {"workflows": list_workflows(), "count": len(list_workflows())}
+
+
+@app.post("/api/agent/run")
+def api_agent_run(req: AgentRunRequest):
+    """Run an agentic workflow and return the final answer + evidence trace."""
+    from src.agents.runner import run_auto, run_generic, run_workflow
+    from src.agents.workflows import route_workflow
+    if not req.query.strip():
+        raise HTTPException(400, "query is required")
+    spec = _agent_spec(req.provider, req.model, req.base_url, req.api_key)
+    reg = _tools()
+    if req.mode == "freeform":
+        gen = run_generic(req.query, registry=reg, spec=spec, context=req.context,
+                          allow_mutating=req.allow_mutating, max_steps=req.max_steps)
+    elif req.workflow:
+        gen = run_workflow(req.workflow, req.query, registry=reg, spec=spec,
+                           context=req.context, allow_mutating=req.allow_mutating,
+                           max_steps=req.max_steps)
+    else:
+        gen = run_auto(req.query, registry=reg, spec=spec, context=req.context,
+                       allow_mutating=req.allow_mutating, max_steps=req.max_steps)
+    events = list(gen)
+    final = next((e for e in reversed(events) if e.get("event") == "complete"), None)
+    if final is None:
+        err = next((e for e in events if e.get("event") == "error"), None)
+        raise HTTPException(400, (err or {}).get("error", "agent run failed"))
+    return {"routed_workflow": req.workflow or route_workflow(req.query),
+            "workflow": final.get("workflow", ""), "intent": final.get("intent", ""),
+            "answer": final.get("answer", ""), "citations": final.get("citations", []),
+            "observations": final.get("observations", []), "trace": final.get("trace", []),
+            "plan": final.get("plan", {})}
+
+
+@app.post("/api/agent/stream")
+def api_agent_stream(req: AgentRunRequest):
+    """Server-sent events for the agent loop (plan -> tool calls -> answer)."""
+    from src.agents.runner import run_auto, run_generic, run_workflow
+    if not req.query.strip():
+        raise HTTPException(400, "query is required")
+    spec = _agent_spec(req.provider, req.model, req.base_url, req.api_key)
+    reg = _tools()
+
+    def gen():
+        if req.mode == "freeform":
+            stream = run_generic(req.query, registry=reg, spec=spec, context=req.context,
+                                 allow_mutating=req.allow_mutating,
+                                 max_steps=req.max_steps)
+        elif req.workflow:
+            stream = run_workflow(req.workflow, req.query, registry=reg, spec=spec,
+                                  context=req.context, allow_mutating=req.allow_mutating,
+                                  max_steps=req.max_steps)
+        else:
+            stream = run_auto(req.query, registry=reg, spec=spec, context=req.context,
+                              allow_mutating=req.allow_mutating, max_steps=req.max_steps)
+        for ev in stream:
+            yield f"data: {json.dumps(ev, default=str)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

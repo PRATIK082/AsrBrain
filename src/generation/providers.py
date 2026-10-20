@@ -5,6 +5,7 @@ API keys are passed per-request from UI session state — never logged, never pe
 Supports streaming (SSE-style token events) and non-streaming drafts.
 """
 from __future__ import annotations
+import json
 from dataclasses import dataclass
 from typing import Iterator
 import httpx
@@ -58,6 +59,69 @@ def complete(prompt: str, spec: ProviderSpec) -> tuple[str, str]:
         return "", f"cloud HTTP {r.status_code}: {r.text[:200]}"
     except Exception as e:
         return "", str(e)[:200]
+
+
+def _normalize_tool_calls(raw_calls: list) -> list[dict]:
+    """Normalize provider tool calls to ``[{name, arguments(dict)}, ...]``."""
+    out: list[dict] = []
+    for call in raw_calls or []:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") or call
+        name = fn.get("name") or ""
+        if not name:
+            continue
+        args = fn.get("arguments", fn.get("parameters", {}))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except Exception:
+                args = {"_raw": args}
+        if not isinstance(args, dict):
+            args = {}
+        out.append({"name": name, "arguments": args})
+    return out
+
+
+def chat_with_tools(messages: list[dict], tools: list[dict],
+                     spec: ProviderSpec) -> dict:
+    """Native tool-calling round trip.
+
+    ``tools`` is a list of OpenAI-style function schemas.  Returns
+    ``{"content": str, "tool_calls": [{"name", "arguments"}], "error": str}``.
+    Never raises: a provider error is reported through the ``error`` key so the
+    agent can fall back to its deterministic planner.
+    """
+    payload_messages = list(messages or [])
+    payload_tools = list(tools or [])
+    try:
+        if spec.kind == "ollama":
+            r = httpx.post(f"{spec.base_url.rstrip('/')}/api/chat",
+                           json={"model": spec.model, "messages": payload_messages,
+                                 "tools": payload_tools, "stream": False,
+                                 "options": {"temperature": 0.1, "num_ctx": 8192}},
+                           timeout=spec.timeout_s)
+            if r.status_code != 200:
+                return {"content": "", "tool_calls": [], "error": f"ollama HTTP {r.status_code}"}
+            data = r.json()
+            message = data.get("message", {}) or {}
+            return {"content": message.get("content", "") or "",
+                    "tool_calls": _normalize_tool_calls(message.get("tool_calls", [])),
+                    "error": ""}
+        headers = {"Authorization": f"Bearer {spec.api_key}"} if spec.api_key else {}
+        r = httpx.post(f"{spec.base_url.rstrip('/')}/chat/completions",
+                       json={"model": spec.model, "messages": payload_messages,
+                             "tools": payload_tools, "temperature": 0.1},
+                       headers=headers, timeout=spec.timeout_s)
+        if r.status_code != 200:
+            return {"content": "", "tool_calls": [],
+                    "error": f"cloud HTTP {r.status_code}: {r.text[:200]}"}
+        message = (r.json().get("choices", [{}])[0].get("message", {}) or {})
+        return {"content": message.get("content", "") or "",
+                "tool_calls": _normalize_tool_calls(message.get("tool_calls", [])),
+                "error": ""}
+    except Exception as e:
+        return {"content": "", "tool_calls": [], "error": str(e)[:200]}
 
 
 def stream(prompt: str, spec: ProviderSpec) -> Iterator[str]:

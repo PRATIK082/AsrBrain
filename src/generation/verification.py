@@ -9,8 +9,11 @@ CITE_RE = re.compile(r"\[E(\d+)\]")
 
 def split_claims(draft: str) -> list[str]:
     sents = [s.strip() for s in SENT_SPLIT.split(draft) if s.strip()]
-    # keep factual-looking sentences; skip pure headers
-    return [s for s in sents if len(s.split()) >= 4 and not s.startswith("#")][:30]
+    # keep factual-looking sentences; skip pure headers.
+    # A short sentence is normally dropped, but a cited one is always kept so that a
+    # concise but properly cited answer is not treated as unsupported.
+    return [s for s in sents
+            if (len(s.split()) >= 4 or CITE_RE.search(s)) and not s.startswith("#")][:30]
 
 
 def verify(draft: str, evidence: list[dict], plan: dict) -> dict:

@@ -33,3 +33,136 @@ export interface DiffItem {
   base_value?: unknown; target_value?: unknown;
   compatibility_risk: string; migration_action?: string | null;
 }
+
+/* ----------------------------------------------------------- GraphRAG + tools */
+
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  tags: string[];
+  mutating: boolean;
+}
+
+export interface ToolListResponse {
+  tools: ToolSpec[];
+  count: number;
+  names: string[];
+}
+
+export interface GraphNode {
+  node_id: string;
+  type: string;
+  label: string;
+  properties?: Record<string, unknown>;
+  degree?: number;
+  community?: string | null;
+  source?: string | null;
+  score?: number;
+  channels?: string[];
+}
+
+export interface GraphEdge {
+  src: string;
+  dst: string;
+  rel: string;
+  weight?: number;
+  confidence?: number;
+  is_inferred?: number | boolean;
+  provenance?: string;
+}
+
+export interface GraphCommunity {
+  community_id: string;
+  title: string;
+  summary?: string;
+  member_count?: number;
+  level?: number;
+  members?: string[];
+  score?: number;
+}
+
+export interface GraphStats {
+  path?: string;
+  nodes: number;
+  edges: number;
+  communities: number;
+  trace_links: number;
+  inferred_edges?: number;
+  nodes_by_type?: Record<string, number>;
+  edges_by_rel?: Record<string, number>;
+}
+
+export interface GraphQueryResult {
+  mode: string;
+  query: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  communities: GraphCommunity[];
+  seeds?: string[];
+  seed_nodes?: GraphNode[];
+  node_count?: number;
+  edge_count?: number;
+  community_count?: number;
+  stats?: GraphStats;
+}
+
+export interface MindmapResult {
+  topic: string;
+  source: string;
+  mermaid: string;
+  tree?: { label: string; children?: MindmapNode[] };
+  nodes?: GraphNode[];
+  seeds?: string[];
+  citations?: Record<string, unknown>;
+  node_count?: number;
+  empty?: boolean;
+}
+
+export interface MindmapNode {
+  label: string;
+  children?: MindmapNode[];
+}
+
+export interface AgentWorkflowStep {
+  tool: string;
+  args?: Record<string, unknown>;
+  purpose?: string;
+}
+
+export interface AgentWorkflow {
+  name: string;
+  title: string;
+  description: string;
+  intent: string;
+  tools: string[];
+  context_keys: string[];
+  steps: AgentWorkflowStep[];
+}
+
+export interface AgentObservation {
+  tool: string;
+  summary: string;
+  ok?: boolean;
+  data?: unknown;
+}
+
+export type AgentEvent =
+  | { event: "workflow"; workflow: string; title?: string; intent?: string; steps?: AgentWorkflowStep[] }
+  | { event: "plan"; plan?: { steps?: AgentWorkflowStep[]; rationale?: string; mode?: string } }
+  | { event: "tool_call"; tool: string; args?: Record<string, unknown>; purpose?: string }
+  | { event: "tool_result"; tool: string; ok?: boolean; summary?: string; data?: unknown; error?: string; duration_ms?: number }
+  | { event: "tool_skipped"; tool: string; reason?: string }
+  | { event: "complete"; answer: string; workflow?: string; intent?: string; citations?: unknown[]; observations?: AgentObservation[]; trace?: unknown[]; plan?: unknown }
+  | { event: "error"; error: string };
+
+export interface AgentRunResult {
+  routed_workflow: string;
+  workflow: string;
+  intent: string;
+  answer: string;
+  citations: unknown[];
+  observations: AgentObservation[];
+  trace: unknown[];
+  plan: unknown;
+}

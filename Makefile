@@ -1,4 +1,5 @@
-.PHONY: install ingest index api ui test eval docker-minimal docker-standard docker-full
+.PHONY: install ingest index api ui test eval docker-minimal docker-standard docker-full \
+        graph-build graph-stats graph-query tools workflows mindmap agent
 
 install:
 	pip install -r requirements.txt
@@ -20,6 +21,30 @@ test:
 
 eval:
 	python -m src.evaluation.run --benchmark data/benchmarks/autosar_benchmark_v1.jsonl --out reports/evaluation/validated.json
+
+# ---------------------------------------------------------------- GraphRAG
+# CODE_DIRS may point at a folder with C sources / tests (repeat with space).
+#   make graph-build CODE_DIRS="src ../some_autosar_code"
+graph-build:
+	python -m src.graphrag --canonical $(or $(CANONICAL_DB),data/canonical/canonical.db) --out $(or $(GRAPH_DB),data/graph/graph.db) $(foreach d,$(CODE_DIRS),--code-dir $(d))
+
+graph-stats:
+	python -m src.tools.cli call graph.stats
+
+graph-query:
+	python -m src.tools.cli call graph.search query="$(QUERY)" mode=$(or $(MODE),hybrid) depth=$(or $(DEPTH),2)
+
+tools:
+	python -m src.tools.cli list
+
+workflows:
+	python -m src.tools.cli workflows
+
+mindmap:
+	python -m src.tools.cli mindmap "$(or $(TOPIC),CanIf)" --source $(or $(SOURCE),auto) --depth $(or $(DEPTHTH),2)
+
+agent:
+	python -m src.tools.cli agent "$(QUERY)" --workflow $(or $(WORKFLOW),auto) --provider $(or $(PROVIDER),none)
 
 docker-minimal:
 	docker compose --profile minimal up --build
