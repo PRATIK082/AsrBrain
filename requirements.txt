@@ -12,7 +12,8 @@ httpx>=0.27
 qdrant-client>=1.9
 
 # Optional — enabled when installed
-# pymupdf>=1.24          # layout-aware extraction (preferred over pypdf when present)
+pymupdf>=1.24          # layout-aware extraction + PDF page-image rendering for diagrams
+pillow>=10.0           # image byte handling for diagram snapshots
 # pdfplumber>=0.11       # table extraction fallback
 # sentence-transformers>=2.6  # dense embeddings (EMBEDDING_BACKEND=sbert)
 # torch                  # required by sentence-transformers
