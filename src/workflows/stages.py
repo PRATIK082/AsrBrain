@@ -50,7 +50,26 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
            "message": "Identifying release, platform, module, and intent"}
     if cancel.get("stop"):
         return
-    ret = pipe.retrieve(query, top_k_final=top_k or 0)
+    # Scope first (Phase 5): the caller's filters decide the plan before
+    # anything is scored, so an out-of-scope passage can never be ranked into
+    # the answer. The scope report travels with the result.
+    scope = None
+    if known_slots:
+        from ..retrieval.scope import scope_from_dict
+        scope = scope_from_dict({
+            "project_id": known_slots.get("project_id") or "",
+            "branch": known_slots.get("branch") or "",
+            "ecu": known_slots.get("ecu") or "",
+            "vendor": known_slots.get("vendor") or "",
+            "tenant_id": known_slots.get("tenant_id") or "",
+            "releases": known_slots.get("releases") or [],
+            "platforms": known_slots.get("platforms") or [],
+            "modules": known_slots.get("modules") or [],
+            "document_types": known_slots.get("document_types") or [],
+            "source_types": known_slots.get("source_types") or [],
+            "artifact_versions": known_slots.get("artifact_versions") or [],
+        })
+    ret = pipe.retrieve(query, top_k_final=top_k or 0, scope=scope)
     plan = ret["plan"]
     if known_slots:
         for k in ("releases", "platforms", "modules"):

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, streamChat } from "../lib/api";
 import type {
+  Answerability,
   AssistantCapabilities,
   AssistantStep,
   AssistantTurn,
@@ -272,6 +273,7 @@ export function useAssistant() {
       let level = "";
       let citationCoverage = 0;
       let llm = "";
+      let answerability: Answerability | undefined;
       let clarify: AssistantTurn["clarify"];
 
       try {
@@ -329,6 +331,7 @@ export function useAssistant() {
             level = ev.level ?? "";
             citationCoverage = ev.citation_coverage ?? 0;
             llm = ev.llm ?? "";
+            answerability = ev.answerability;
           }
         }
       } catch (e) {
@@ -355,6 +358,7 @@ export function useAssistant() {
                   level,
                   citation_coverage: citationCoverage,
                   llm,
+                  answerability,
                   clarify,
                   pending: false,
                 }

@@ -219,13 +219,28 @@ def api_chat(req: ChatRequest):
         return {"conversation_id": cid, "needs_clarification": True, **clarify}
     answer = (final or {}).get("answer", "")
     evidence = [e for e in events if e.get("event") == "evidence"]
+    verification = {
+        "citation_coverage": (final or {}).get("citation_coverage", 0.0),
+        "claim_support_rate": (final or {}).get("claim_support_rate", 0.0),
+        "evidence_coverage": (final or {}).get("evidence_coverage", 0.0),
+    }
+    answerability = _answerability_for(
+        {"evidence": evidence, "verification": verification,
+         "plan": (final or {}).get("plan", {}), "scope": slots},
+        answer)
     _store.add_message(cid, "assistant", answer,
                        {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", ""),
                         "plan": (final or {}).get("plan", {}),
                         "graph": (final or {}).get("graph", []),
                         "evidence": evidence,
+                        "verification": verification,
+                        "answerability": answerability,
+                        "scope": slots,
                         "followups": (final or {}).get("followups", [])})
-    return {"conversation_id": cid, "needs_clarification": False, **(final or {})}
+    _record_audit(cid, req.message, answer, answerability, slots,
+                  (final or {}).get("llm", ""), req.provider, evidence)
+    return {"conversation_id": cid, "needs_clarification": False,
+            "answerability": answerability, **(final or {})}
 
 
 @app.post("/api/chat/stream")
@@ -256,13 +271,42 @@ def api_chat_stream(req: ChatRequest):
                 evidence.append(ev)
             if ev.get("event") == "complete":
                 last = ev
+                # The answerability status is computed by code, not claimed by
+                # the model (ADR-0001). It travels with the answer so the UI
+                # never has to guess it from a confidence number.
+                ev["answerability"] = _answerability_for(
+                    {
+                        "evidence": evidence,
+                        "verification": {
+                            "citation_coverage": ev.get("citation_coverage", 0.0),
+                            "claim_support_rate": ev.get("claim_support_rate", 0.0),
+                            "evidence_coverage": ev.get("evidence_coverage", 0.0),
+                        },
+                        "plan": ev.get("plan", {}),
+                        "scope": slots,
+                    },
+                    ev.get("answer", ""))
             yield f"data: {json.dumps(ev)}\n\n"
         if last.get("answer"):
+            verification = {
+                "citation_coverage": last.get("citation_coverage", 0.0),
+                "claim_support_rate": last.get("claim_support_rate", 0.0),
+                "evidence_coverage": last.get("evidence_coverage", 0.0),
+            }
+            answerability = _answerability_for(
+                {"evidence": evidence, "verification": verification,
+                 "plan": last.get("plan", {}), "scope": slots},
+                last["answer"])
             _store.add_message(cid, "assistant", last["answer"],
                                {"trace": last.get("trace", {}), "llm": last.get("llm", ""),
                                 "plan": last.get("plan", {}), "graph": last.get("graph", []),
                                 "evidence": evidence,
+                                "verification": verification,
+                                "answerability": answerability,
+                                "scope": slots,
                                 "followups": last.get("followups", [])})
+            _record_audit(cid, req.message, last["answer"], answerability, slots,
+                          last.get("llm", ""), req.provider, evidence)
         elif answer_parts:
             _store.add_message(cid, "assistant", "".join(answer_parts), {"partial": True})
 
@@ -821,19 +865,102 @@ def api_v2_modules():
     }
 
 
+def _record_audit(conversation_id: str, question: str, answer: str,
+                  answerability: dict, scope: dict, llm: str, provider: str,
+                  evidence: list[dict]) -> None:
+    """Write one answer audit row. Auditing must never break the answer."""
+    try:
+        from src.audit.trail import new_request_id, record_answer
+        try:
+            store = _registry()
+        except Exception:
+            store = None
+        citations = [{"label": e.get("label", ""), "source_pdf": e.get("source_pdf", ""),
+                      "page": e.get("page"), "section": e.get("section", ""),
+                      "release": e.get("release", "")} for e in (evidence or [])]
+        record_answer(
+            store,
+            question=question,
+            answer=answer,
+            status=(answerability or {}).get("status", ""),
+            request_id=new_request_id(),
+            conversation_id=conversation_id,
+            scope=scope or {},
+            citations=citations,
+            tool_calls=[],
+            model_provider=provider,
+            model_name=llm,
+            routing_reason="local-first default",
+        )
+    except Exception:
+        pass
+
+
+def _answerability_for(meta: dict, answer: str = "") -> dict:
+    """Compute the answerability contract for a stored assistant message.
+
+    The status is computed by code (ADR-0001), never claimed by the model and
+    never derived from the numeric confidence.
+    """
+    from src.answerability import evaluate_answerability
+    meta = meta or {}
+    evidence = meta.get("evidence") or []
+    verification = meta.get("verification") or {}
+    return dict(evaluate_answerability(
+        evidence=evidence,
+        verification=verification,
+        tool_results=meta.get("tool_results") or [],
+        scope=meta.get("scope") or {},
+        plan=meta.get("plan") or {},
+        answer=answer,
+        conflicts=meta.get("conflicts") or [],
+    ))
+
+
 @app.get("/api/v2/answerability/{conversation_id}/{message_index}")
 def api_v2_answerability(conversation_id: str, message_index: int):
     """The evidence-first answerability contract for one stored answer.
 
-    Not implemented yet (Phase 5). Returns 501 with the reason so the UI can
-    show an honest "not computed" state instead of inventing a status.
+    The status is computed by code from the stored evidence and the verifier
+    result, so it can never be a number the model made up.
     """
-    raise HTTPException(
-        501,
-        "answerability gate is not computed yet (Phase 5); the UI must not infer a "
-        "status from the numeric confidence",
-        headers={"X-AsrBrain-Reason": "answerability-gate-not-implemented"},
-    )
+    conversation = _store.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(404, "conversation not found")
+    messages = conversation.get("messages", [])
+    assistant = [m for m in messages if m.get("role") == "assistant"]
+    if message_index < 0 or message_index >= len(assistant):
+        raise HTTPException(404, "message index out of range")
+    message = assistant[message_index]
+    result = _answerability_for(message.get("meta") or {}, message.get("content", ""))
+    return {"conversation_id": conversation_id, "message_index": message_index,
+            "answerability": result, **result}
+
+
+@app.get("/api/v2/answerability/{conversation_id}")
+def api_v2_answerability_conversation(conversation_id: str):
+    """The answerability contract for every assistant turn of a conversation."""
+    conversation = _store.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(404, "conversation not found")
+    assistant = [m for m in conversation.get("messages", []) if m.get("role") == "assistant"]
+    turns = []
+    for index, message in enumerate(assistant):
+        result = _answerability_for(message.get("meta") or {}, message.get("content", ""))
+        turns.append({"message_index": index, "answerability": result, **result})
+    return {"conversation_id": conversation_id, "turns": turns, "count": len(turns)}
+
+
+@app.get("/api/v2/audit/{conversation_id}")
+def api_v2_audit(conversation_id: str):
+    """The answer audit trail for one conversation (ADR-0002, ADR-0009)."""
+    from src.audit.trail import read_audits
+    try:
+        store = _registry()
+    except Exception:
+        store = None
+    records = read_audits(store, conversation_id=conversation_id)
+    return {"conversation_id": conversation_id, "audits": records, "count": len(records)}
 
 
 # ---------------- v2: provenance registry + background jobs ----------------

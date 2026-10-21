@@ -342,6 +342,68 @@ ArxmlExplorer.tsx`) shows the tool catalogue, the validation findings with
 their lines, the reference resolution and the component tree. Design and
 rollback: `docs/architecture/phase-4-implementation-plan.md`.
 
+## Scope-first retrieval, answerability gate and audit trail (Phase 5)
+
+The assistant no longer answers with a confidence number. It answers with a
+**status that is computed by code**, inside a **scope that is applied before
+retrieval**, and it leaves an **audit record** of every answer.
+
+```
+question ──► scope ──► plan (scope wins) ──► filters ──► scoring ──► evidence
+                │                                    │
+                └── kept / dropped / unapplied       └──► answerability gate
+                                                             │
+                                                             └─► answer_audits row
+```
+
+### The four statuses (ADR-0001)
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | a deterministic tool result and the authoritative source evidence agree |
+| `EVIDENCE_SUPPORTED` | the cited sources support the answer; no deterministic validation applies |
+| `NEEDS_ENGINEER_REVIEW` | partial evidence, ambiguity, a conflict, or missing context |
+| `INSUFFICIENT_EVIDENCE` | the corpus does not cover it — the result names the missing artifact and the scope searched |
+
+* `src/answerability/gate.py` — `evaluate_answerability(evidence, verification, tool_results, scope, plan, answer)`.
+* A numeric confidence is **not** a correctness rate and is never the
+  user-facing contract; it stays inside the collapsed "Audit" section.
+* `INSUFFICIENT_EVIDENCE` is a successful answer: it says what is missing.
+
+### Scope first
+
+* `src/retrieval/scope.py` — `Scope` (project, branch, ECU, vendor, tenant,
+  release, platform, module, document type, source type, artifact version,
+  access policy) and `apply_scope()`.
+* The scope is applied **before** anything is scored and overrides the plan, so
+  a filter and a plan can never contradict each other.
+* Nothing is dropped silently: the report gives `kept`, `dropped` per reason,
+  `dropped_total`, `total`.
+* A filter the corpus cannot express (project, branch, ECU, vendor, tenant,
+  source type, artifact version) is reported in **`unapplied`** — a filter that
+  appears to work but does not is worse than no filter at all.
+
+### The audit trail
+
+* `src/audit/trail.py` — one `answer_audits` row per answer: request id,
+  question, answer, status, scope, citations, tool calls, model route and
+  latency. Auditing is wrapped in `try/except`: a failing audit never breaks
+  an answer.
+
+### Routes (additive)
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v2/answerability/{conversation_id}/{message_index}` | the status of one stored answer (`404` when unknown) |
+| `GET /api/v2/answerability/{conversation_id}` | every assistant turn of a conversation |
+| `GET /api/v2/audit/{conversation_id}` | the audit rows of a conversation |
+
+`POST /api/chat` and `/api/chat/stream` now compute the verification signals,
+the status and the audit row, store the status with the message, and return
+it (the SSE `complete` event carries it too, so the UI never guesses).
+
+Details: `docs/architecture/phase-5-implementation-plan.md`.
+
 ## Architecture
 
 ```

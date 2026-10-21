@@ -18,14 +18,48 @@ class RetrievalPipeline:
         self.chunks = chunks
         self.by_id = {c["chunk_id"]: c for c in chunks}
 
-    def retrieve(self, query: str, top_k_final: int = 0) -> dict:
+    def retrieve(self, query: str, top_k_final: int = 0, scope=None) -> dict:
+        """Retrieve evidence inside a scope.
+
+        The scope is applied **before** anything is scored (Phase 5): a chunk
+        that is out of scope can never be ranked into the answer. The scope
+        report travels with the result so the caller can show what was
+        filtered and which filters could not be applied at all.
+        """
         top_k_final = top_k_final or settings.final_evidence
         plan: QueryPlan = parse(query)
         rw = rewrite(plan)
 
+        # Scope first (Phase 5): the caller's scope decides the plan before
+        # anything is scored, so the release/platform/module filters that run
+        # later can never contradict the scope.
+        if scope is not None:
+            from .scope import scope_from_dict
+            scope_obj = scope_from_dict(scope) if isinstance(scope, dict) else scope
+            if scope_obj.releases:
+                plan.releases = list(scope_obj.releases)
+                plan.release_mode = ("exact" if len(scope_obj.releases) == 1
+                                     else "comparison")
+            if scope_obj.platforms:
+                plan.platforms = list(scope_obj.platforms)
+            if scope_obj.modules:
+                plan.modules = list(scope_obj.modules)
+            if scope_obj.document_types:
+                plan.document_types = list(scope_obj.document_types)
+
+        scoped = self.chunks
+        scope_report: dict = {"applied": False, "kept": len(self.chunks),
+                              "dropped": {}, "dropped_total": 0, "unapplied": [],
+                              "scope": {}, "total": len(self.chunks)}
+        if scope is not None:
+            from .scope import apply_scope
+            result = apply_scope(self.chunks, scope)
+            scoped = result.kept
+            scope_report = result.to_dict()
+            scope_report["applied"] = True
+
         def per_release(release: str) -> list[dict]:
-            pool = apply_filters(self.chunks, plan, release_override=release)
-            idx_map = [self.chunks.index(c) for c in pool] or list(range(len(self.chunks)))
+            pool = apply_filters(scoped, plan, release_override=release)
             # score only the filtered pool; fuse the raw AND the corrected query
             # so a bad auto-correction can never sink a good original (and vice
             # versa) — the "Interpreted as" form only ADDS recall.
@@ -71,4 +105,5 @@ class RetrievalPipeline:
         retrieval_score = float(np.mean([c.get("rerank_score", 0) for c in evidence])) if evidence else 0.0
         return {"plan": plan.model_dump(), "rewrites": rw, "evidence": evidence,
                 "per_release": {k: len(v) for k, v in per_rel.items()},
-                "retrieval_score": round(retrieval_score, 4)}
+                "retrieval_score": round(retrieval_score, 4),
+                "scope": scope_report}

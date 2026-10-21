@@ -35,7 +35,7 @@ export type StreamEvent =
       label: string;
     }
   | { event: "token"; text: string }
-  | { event: "complete"; answer: string; confidence: number; level: string; citation_coverage: number; followups?: string[]; trace: Record<string, unknown>; graph: unknown[]; llm?: string };
+  | { event: "complete"; answer: string; confidence: number; level: string; citation_coverage: number; followups?: string[]; trace: Record<string, unknown>; graph: unknown[]; llm?: string; answerability?: Answerability };
 
 export interface Conversation { id: string; title: string; updated_at: number }
 

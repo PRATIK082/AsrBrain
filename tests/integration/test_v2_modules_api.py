@@ -48,15 +48,15 @@ def test_v2_catalogue_contains_the_nine_product_modules():
     } <= ids
 
 
-def test_v2_answerability_is_not_implemented_and_says_so():
+def test_v2_answerability_of_an_unknown_conversation_is_not_found():
+    # Phase 1 shipped a 501 placeholder; Phase 5 implements the gate, so an
+    # unknown conversation is now a 404. The endpoint must never answer with a
+    # status it did not compute.
     c = TestClient(app)
     r = c.get("/api/v2/answerability/conv-missing/0")
-    assert r.status_code == 501
+    assert r.status_code == 404
     body = r.json()
-    # The body must explain itself; the UI must not guess a status.
     assert "detail" in body
-    assert "answerability" in body["detail"].lower()
-    # And it must never look like a successful answer.
     assert "status" not in body
 
 
