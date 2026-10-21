@@ -8,6 +8,10 @@ import type {
   StarterPromptGroup,
   StreamEvent,
   TriageCategory,
+  ArxmlToolSpec,
+  ArxmlV2Artifact,
+  ArxmlV2Tree,
+  ArxmlValidationResult,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -81,6 +85,39 @@ export const api = {
     if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`);
     return (await r.json()) as Answerability;
   },
+
+  /* ---------------- ARXML Explorer (v2) ---------------- */
+
+  /** The deterministic ARXML tools (ADR-0005). */
+  arxmlTools: () => json<{ tools: ArxmlToolSpec[]; count: number }>("/api/v2/arxml/tools"),
+
+  /** Every ARXML artifact known to the runtime. */
+  arxmlV2Artifacts: () => json<{ artifacts: ArxmlV2Artifact[]; count: number }>(
+    "/api/v2/arxml/artifacts"),
+
+  /** The component tree of one artifact, with the ports of every component. */
+  arxmlV2Tree: (artifactId: string) =>
+    json<ArxmlV2Tree>(`/api/v2/arxml/${encodeURIComponent(artifactId)}/tree`),
+
+  /** The validation result of one artifact. */
+  arxmlV2Validate: (artifactId: string) =>
+    json<ArxmlValidationResult>(`/api/v2/arxml/${encodeURIComponent(artifactId)}/validate`),
+
+  /** The resolved and unresolved references of one artifact. */
+  arxmlV2References: (artifactId: string) =>
+    json<{ status: string; resolved: unknown[]; unresolved: unknown[]; counts: Record<string, number>; summary: string }>(
+      `/api/v2/arxml/${encodeURIComponent(artifactId)}/references`),
+
+  /** Look an element up by qualified path or short name. */
+  arxmlV2Path: (artifactId: string, path: string, kind = "") =>
+    json<{ status: string; element?: Record<string, unknown>; error?: string; summary?: string }>(
+      `/api/v2/arxml/${encodeURIComponent(artifactId)}/path?path=${encodeURIComponent(path)}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`),
+
+  /** Trace a communication path between two elements. */
+  arxmlV2Communication: (artifactId: string, source: string, target: string) =>
+    json<{ status: string; paths?: { nodes: string[]; connector_types: string[] }[]; error?: string; summary?: string }>(
+      `/api/v2/arxml/${encodeURIComponent(artifactId)}/communication?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`),
+
 };
 
 /** Thrown when the answerability gate is not available yet (HTTP 501). */

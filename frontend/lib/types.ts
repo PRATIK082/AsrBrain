@@ -294,3 +294,80 @@ export interface ModuleCatalogue {
   modules: WorkspaceModule[];
 }
 
+/* ------------------------------------------------------------------ *
+ * ARXML Explorer (/api/v2/arxml)
+ * ------------------------------------------------------------------ */
+
+export interface ArxmlToolSpec {
+  name: string;
+  description: string;
+  mutating: boolean;
+  inputs: string[];
+}
+
+export interface ArxmlV2Artifact {
+  artifact_id: string;
+  source_path: string;
+  source_sha256: string;
+  autosar_release: string;
+  schema_version: string;
+  parse_status: string;
+  tenant_id: string;
+  project_scope: string;
+  counts: {
+    components: number;
+    ports: number;
+    interfaces: number;
+    connectors: number;
+    runnables: number;
+    ecuc_parameters: number;
+  };
+}
+
+export interface ArxmlV2Port {
+  short_name: string;
+  qualified_name: string;
+  direction: string;
+  interface_type?: string | null;
+  interface_ref?: string | null;
+  line_start?: number;
+}
+
+export interface ArxmlV2Component {
+  short_name: string;
+  qualified_name: string;
+  component_type: string;
+  line_start?: number;
+  ports: ArxmlV2Port[];
+}
+
+export interface ArxmlV2Tree {
+  artifact_id: string;
+  source_path: string;
+  autosar_release: string;
+  components: ArxmlV2Component[];
+  counts: Record<string, number>;
+}
+
+export interface ArxmlFinding {
+  check: string;
+  severity: string;
+  message: string;
+  line_start?: number | null;
+  qualified_name?: string;
+  ref?: string;
+  reason?: string;
+}
+
+export interface ArxmlValidationResult {
+  tool: string;
+  status: string;
+  severity: string;
+  message: string;
+  artifact_id: string;
+  source_path: string;
+  checks: { check: string; passed: boolean; detail: string }[];
+  findings: ArxmlFinding[];
+  scope: Record<string, number>;
+  summary?: string;
+}

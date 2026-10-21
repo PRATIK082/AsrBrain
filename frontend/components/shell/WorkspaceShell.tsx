@@ -6,6 +6,7 @@ import { AssistantShell } from "../assistant/AssistantShell";
 import { EvidenceDrawer } from "./EvidenceDrawer";
 import { EmptyModule } from "./EmptyModule";
 import { ModuleNav } from "./ModuleNav";
+import { ArxmlExplorer } from "./ArxmlExplorer";
 
 /**
  * Modules that are backed by a working surface today. Everything else renders
@@ -13,9 +14,13 @@ import { ModuleNav } from "./ModuleNav";
  */
 const SURFACE_BY_MODULE: Record<string, string> = {
   chat: "assistant",
-  arxml: "arxml",
   diffs: "diff",
   code: "code",
+};
+
+/** Modules with a dedicated explorer instead of the assistant surface. */
+const EXPLORER_BY_MODULE: Record<string, string> = {
+  arxml: "arxml",
 };
 
 /** Offline fallback so the workspace still renders without the API. */
@@ -208,6 +213,7 @@ export function WorkspaceShell() {
   };
 
   const surfaceModule = active ? SURFACE_BY_MODULE[active.id] : undefined;
+  const explorerModule = active ? EXPLORER_BY_MODULE[active.id] : undefined;
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink-900 text-fg">
@@ -218,7 +224,9 @@ export function WorkspaceShell() {
       />
 
       <div className="relative flex min-w-0 flex-1">
-        {surfaceModule ? (
+        {explorerModule ? (
+          <ArxmlExplorer />
+        ) : surfaceModule ? (
           <AssistantShell
             surface={surface}
             onSurfaceChange={setSurface}

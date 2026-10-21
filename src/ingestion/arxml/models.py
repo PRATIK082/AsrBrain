@@ -15,6 +15,9 @@ class ArxmlArtifact(BaseModel):
     tenant_id: str = "default"
     parse_status: str = "ok"
     validation_warnings: list[str] = Field(default_factory=list)
+    line_start: int = 0
+    line_end: int = 0
+    element_count: int = 0
 
 
 class SoftwareComponent(BaseModel):
@@ -23,6 +26,9 @@ class SoftwareComponent(BaseModel):
     qualified_name: str
     component_type: str
     package_path: str
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     ports: list[str] = Field(default_factory=list)
     runnables: list[str] = Field(default_factory=list)
     internal_behaviors: list[str] = Field(default_factory=list)
@@ -39,6 +45,9 @@ class Port(BaseModel):
     interface_type: str | None = None
     comspec: dict = Field(default_factory=dict)
     component_ref: str = ""
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     source_artifact_id: str = ""
     source_xpath: str = ""
 
@@ -51,6 +60,9 @@ class PortInterface(BaseModel):
                             "parameter", "nv_data", "trigger", "unknown"] = "unknown"
     data_elements: list[dict] = Field(default_factory=list)
     operations: list[dict] = Field(default_factory=list)
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     source_artifact_id: str = ""
     source_xpath: str = ""
 
@@ -62,6 +74,10 @@ class RteConnector(BaseModel):
     requester_component_ref: str | None = None
     requester_port_ref: str | None = None
     composition_ref: str | None = None
+    uuid: str | None = None
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     source_artifact_id: str = ""
     source_xpath: str = ""
 
@@ -73,6 +89,10 @@ class RunnableEntity(BaseModel):
     events: list[str] = Field(default_factory=list)
     data_accesses: list[dict] = Field(default_factory=list)
     server_call_points: list[dict] = Field(default_factory=list)
+    uuid: str | None = None
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     source_artifact_id: str = ""
     source_xpath: str = ""
 
@@ -85,6 +105,9 @@ class EcucParameter(BaseModel):
     value: str | int | float | bool | None = None
     reference_target: str | None = None
     container_path: str = ""
+    element_type: str = ""
+    line_start: int = 0
+    line_end: int = 0
     source_artifact_id: str = ""
     source_xpath: str = ""
 
@@ -98,3 +121,6 @@ class ArxmlTopology(BaseModel):
     runnables: list[RunnableEntity] = Field(default_factory=list)
     ecuc_parameters: list[EcucParameter] = Field(default_factory=list)
     unresolved_refs: list[dict] = Field(default_factory=list)
+    line_start: int = 0
+    line_end: int = 0
+    element_count: int = 0

@@ -293,6 +293,55 @@ Migration `007_source_location_chunk.sql` adds `chunk_id` to `source_locations`
 (additive, portable, forward-only). Design and rollback: `docs/architecture/
 phase-3-implementation-plan.md`.
 
+## ARXML as structured data (Phase 4)
+
+ARXML is **not** RAG text. It is parsed into typed objects that keep the file
+and the line they came from, and it is queried with deterministic tools.
+
+* `src/ingestion/arxml/xml_reader.py` — a line-aware XML reader (expat based,
+  because `xml.etree` discards source positions). Every element now has a line
+  range, a UUID and a qualified path. DOCTYPE/ENTITY declarations are rejected;
+  external entities are never resolved.
+* `src/ingestion/arxml/parser.py` — the rewritten parser. It records the
+  release **only when the document states it** and leaves it empty otherwise,
+  and it populates the fields that were previously declared but never filled
+  (port comspec, runnable events/data accesses/server call points, ECUC value
+  type and reference target, connector component references).
+* `src/ingestion/arxml/validation.py` — `validate_arxml()` returns a
+  `ValidationResult` with every check, every finding and the line it was
+  observed on. *"Validated" is a claim, and a claim needs evidence.*
+* `src/ingestion/arxml/tools.py` — the six deterministic tools:
+  `validate_arxml`, `resolve_arxml_references`, `query_arxml_path`,
+  `diff_arxml_versions`, `trace_communication_path`, `analyze_change_impact`.
+  None of them invents structure: a miss names the artifact, path and scope
+  that were searched.
+* `src/graph/store.py` — the typed graph: a closed vocabulary of node types and
+  relations (an unknown type is rejected at write time), mandatory provenance on
+  every edge (artifact version, source location, extraction method, confidence,
+  `is_inferred`), and an interface so FalkorDB can replace the local SQLite
+  implementation later.
+* `src/ingestion/arxml/runtime.py` — a persistent store
+  (`data/canonical/arxml/<artifact_id>.json`); the previous in-memory dict lost
+  every document on restart.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v2/arxml/tools` | The deterministic tool catalogue. |
+| `GET /api/v2/arxml/artifacts` | Every registered ARXML artifact. |
+| `POST /api/v2/arxml/upload` | Parse, validate, persist, register the artifact + version. |
+| `GET /api/v2/arxml/{id}/validate` | The validation result. |
+| `GET /api/v2/arxml/{id}/references` | Which references resolved and which did not. |
+| `GET /api/v2/arxml/{id}/path?path=&kind=` | Look an element up by qualified path. |
+| `GET /api/v2/arxml/{id}/communication?source=&target=` | Trace a signal path. |
+| `GET /api/v2/arxml/{id}/tree` | The component tree for the Explorer. |
+| `POST /api/v2/arxml/diff` | Structural difference between two versions. |
+| `POST /api/v2/arxml/impact` | Which elements a change affects. |
+
+The **ARXML Explorer** in the React workspace (`frontend/components/shell/
+ArxmlExplorer.tsx`) shows the tool catalogue, the validation findings with
+their lines, the reference resolution and the component tree. Design and
+rollback: `docs/architecture/phase-4-implementation-plan.md`.
+
 ## Architecture
 
 ```

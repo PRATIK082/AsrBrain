@@ -6,6 +6,8 @@ __pycache__/
 venv/
 data/canonical/
 data/indexes/
+# object store bytes (content-addressed, ADR-0012)
+data/objects/
 *.db
 *.sqlite
 qdrant_storage/

@@ -1152,3 +1152,220 @@ def api_v2_registry_bind_citations(req: BindCitationsRequest):
             artifact_version_id=req.artifact_version_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+# ---------------- v2: ARXML as structured data (Phase 4) ----------------
+# Additive only: the 47 v1 routes keep their path, request shape and response
+# keys (ADR-0008). The v2 ARXML surface answers structural questions with the
+# six deterministic tools (ADR-0005) and persists the parsed artifact so it
+# survives a restart (ADR-0002).
+
+_ARXML_RUNTIME_ROOT = "data/canonical/arxml"
+
+
+def _arxml_runtime():
+    from src.ingestion.arxml.runtime import ArxmlRuntime
+    return ArxmlRuntime(_ARXML_RUNTIME_ROOT)
+
+
+def _arxml_topology(artifact_id: str, tenant: str = "default"):
+    """Find a parsed ARXML: the in-memory cache first, then the runtime."""
+    entry = _ARXML_STORE.get(artifact_id)
+    if entry and entry["topology"].artifact.tenant_id == tenant:
+        return entry["topology"]
+    topology = _arxml_runtime().get(artifact_id)
+    if topology is None or topology.artifact.tenant_id != tenant:
+        raise HTTPException(404, "artifact not found or access denied")
+    return topology
+
+
+@app.get("/api/v2/arxml/tools")
+def api_v2_arxml_tools():
+    """The deterministic ARXML tools (ADR-0005)."""
+    from src.ingestion.arxml.tools import tool_catalogue
+    return tool_catalogue()
+
+
+@app.get("/api/v2/arxml/artifacts")
+def api_v2_arxml_artifacts(tenant: str = "default"):
+    """Every stored ARXML artifact with its provenance and counts."""
+    runtime = _arxml_runtime()
+    stored = {a["artifact_id"]: a for a in runtime.list()}
+    for artifact_id, entry in _ARXML_STORE.items():
+        topology = entry["topology"]
+        if topology.artifact.tenant_id != tenant:
+            continue
+        stored.setdefault(artifact_id, {
+            "artifact_id": artifact_id,
+            "source_path": topology.artifact.source_path,
+            "source_sha256": topology.artifact.source_sha256,
+            "autosar_release": topology.artifact.autosar_release,
+            "schema_version": topology.artifact.autosar_schema_version,
+            "parse_status": topology.artifact.parse_status,
+            "tenant_id": topology.artifact.tenant_id,
+            "project_scope": topology.artifact.project_scope,
+            "counts": {
+                "components": len(topology.components),
+                "ports": len(topology.ports),
+                "interfaces": len(topology.interfaces),
+                "connectors": len(topology.connectors),
+                "runnables": len(topology.runnables),
+                "ecuc_parameters": len(topology.ecuc_parameters),
+            },
+        })
+    return {"artifacts": [stored[k] for k in sorted(stored)], "count": len(stored)}
+
+
+@app.get("/api/v2/arxml/{artifact_id}/validate")
+def api_v2_arxml_validate(artifact_id: str, tenant: str = "default"):
+    """Validate a parsed ARXML document and report every finding with a line."""
+    from src.ingestion.arxml.tools import validate as validate_tool
+    return validate_tool(_arxml_topology(artifact_id, tenant))
+
+
+@app.get("/api/v2/arxml/{artifact_id}/references")
+def api_v2_arxml_references(artifact_id: str, tenant: str = "default"):
+    """Resolve every reference the document makes; report the unresolved ones."""
+    from src.ingestion.arxml.tools import resolve_arxml_references
+    return resolve_arxml_references(_arxml_topology(artifact_id, tenant))
+
+
+@app.get("/api/v2/arxml/{artifact_id}/path")
+def api_v2_arxml_path(artifact_id: str, path: str, kind: str = "", tenant: str = "default"):
+    """Look an element up by qualified path or short name."""
+    from src.ingestion.arxml.tools import query_arxml_path
+    return query_arxml_path(_arxml_topology(artifact_id, tenant), path, kind)
+
+
+@app.get("/api/v2/arxml/{artifact_id}/communication")
+def api_v2_arxml_communication(artifact_id: str, source: str, target: str,
+                                tenant: str = "default"):
+    """Trace how a signal travels between two elements through the connectors."""
+    from src.ingestion.arxml.tools import trace_communication_path
+    return trace_communication_path(_arxml_topology(artifact_id, tenant), source, target)
+
+
+@app.get("/api/v2/arxml/{artifact_id}/tree")
+def api_v2_arxml_tree(artifact_id: str, tenant: str = "default"):
+    """A component tree for the ARXML Explorer."""
+    topology = _arxml_topology(artifact_id, tenant)
+    ports_by_component: dict[str, list[dict]] = {}
+    for port in topology.ports:
+        ports_by_component.setdefault(port.component_ref, []).append({
+            "short_name": port.short_name,
+            "qualified_name": port.qualified_name,
+            "direction": port.direction,
+            "interface_ref": port.interface_ref,
+            "interface_type": port.interface_type,
+            "line_start": port.line_start,
+        })
+    interfaces = {i.qualified_name: i for i in topology.interfaces}
+    return {
+        "artifact_id": artifact_id,
+        "autosar_release": topology.artifact.autosar_release,
+        "schema_version": topology.artifact.autosar_schema_version,
+        "components": [{
+            "short_name": c.short_name,
+            "qualified_name": c.qualified_name,
+            "component_type": c.component_type,
+            "uuid": c.uuid,
+            "line_start": c.line_start,
+            "ports": ports_by_component.get(c.qualified_name, []),
+            "interfaces": [{
+                "short_name": p["interface_ref"].rsplit("/", 1)[-1] if p["interface_ref"] else "",
+                "interface_type": (interfaces.get(p["interface_ref"]).interface_type
+                                   if p["interface_ref"] and p["interface_ref"] in interfaces
+                                   else "unknown"),
+                "line_start": (interfaces[p["interface_ref"]].line_start
+                               if p["interface_ref"] and p["interface_ref"] in interfaces else 0),
+            } for p in ports_by_component.get(c.qualified_name, []) if p["interface_ref"]],
+        } for c in topology.components],
+    }
+
+
+@app.post("/api/v2/arxml/diff")
+def api_v2_arxml_diff(base_artifact_id: str, target_artifact_id: str, tenant: str = "default"):
+    """Structural difference between two stored ARXML artifacts."""
+    from src.ingestion.arxml.tools import diff_arxml_versions
+    return diff_arxml_versions(_arxml_topology(base_artifact_id, tenant),
+                               _arxml_topology(target_artifact_id, tenant))
+
+
+@app.post("/api/v2/arxml/impact")
+def api_v2_arxml_impact(base_artifact_id: str, target_artifact_id: str,
+                         element: str = "", tenant: str = "default"):
+    """Which elements and dependents are affected by a change between two artifacts."""
+    from src.ingestion.arxml.tools import analyze_change_impact
+    return analyze_change_impact(_arxml_topology(base_artifact_id, tenant),
+                                 _arxml_topology(target_artifact_id, tenant), element)
+
+
+@app.post("/api/v2/arxml/upload")
+async def api_v2_arxml_upload(file: UploadFile = File(...), tenant: str = "default",
+                               project: str = "", autosar_release: str = ""):
+    """Parse an ARXML file, persist it, and register its provenance.
+
+    The bytes go to the object store (ADR-0012), the artifact and its version
+    are registered in the registry (ADR-0002), and the parsed structure is
+    written to the ARXML runtime so it survives a restart.
+    """
+    if not settings.arxml_enabled:
+        raise HTTPException(503, "ARXML intelligence disabled by feature flag")
+    from src.ingestion.arxml import parse_arxml
+    from src.ingestion.arxml.validation import validate_arxml
+    from src.ingestion.arxml.runtime import ArxmlRuntime
+    from src.objects import default_object_store
+    from src.registry import RegistryStore
+    from src.security.policy import classify_content
+
+    data = await file.read()
+    name = file.filename or "upload.arxml"
+    tmp_dir = os.path.join(settings.pdf_dir, "uploads")
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp = os.path.join(tmp_dir, name)
+    with open(tmp, "wb") as handle:
+        handle.write(data)
+
+    topology = parse_arxml(tmp, tenant_id=tenant, project_scope=project,
+                           autosar_release=autosar_release)
+    validation = validate_arxml(topology)
+    ArxmlRuntime(_ARXML_RUNTIME_ROOT).put(topology)
+
+    registered = {"artifact_version_id": "", "storage_uri": ""}
+    try:
+        from src.ingestion.registry_ingest import register_artifact_bytes
+        registry = RegistryStore(settings.registry_db)
+        try:
+            _artifact, version, ref = register_artifact_bytes(
+                registry, default_object_store(),
+                data=data, project_id=project or "local", name=name, kind="arxml",
+                source_uri=tmp, autosar_release=topology.artifact.autosar_release or "",
+                extractor_name="asrbrain-arxml-parser",
+            )
+            registered = {"artifact_version_id": version.id, "storage_uri": ref.uri}
+        finally:
+            registry.close()
+    except Exception as exc:  # the registry is optional for an upload
+        registered["error"] = str(exc)
+
+    risk = classify_content(data.decode("utf-8", "ignore")[:20000], name)
+    return {
+        "artifact_id": topology.artifact.artifact_id,
+        "classification": risk.classification,
+        "route": "local",
+        "autosar_release": topology.artifact.autosar_release,
+        "schema_version": topology.artifact.autosar_schema_version,
+        "parse_status": topology.artifact.parse_status,
+        "validation": {"status": validation["status"], "severity": validation["severity"],
+                       "findings": len(validation["findings"])},
+        "registered": registered,
+        "counts": {
+            "components": len(topology.components),
+            "ports": len(topology.ports),
+            "interfaces": len(topology.interfaces),
+            "connectors": len(topology.connectors),
+            "runnables": len(topology.runnables),
+            "ecuc_parameters": len(topology.ecuc_parameters),
+        },
+        "warnings": topology.artifact.validation_warnings,
+    }
