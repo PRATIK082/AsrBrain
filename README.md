@@ -206,6 +206,55 @@ say what is missing and which phase delivers it. The API gained two additive rou
 status from a confidence float). CI now runs `pytest`, `tsc`, `next build` and asserts
 that the built stylesheet really contains the design-system classes.
 
+## Provenance registry and job framework (Phase 2)
+
+Phase 2 adds the **provenance-first data model** (`src/registry/`) that every later
+phase builds on, plus a background-job framework.
+
+The evidence spine:
+
+```
+projects ──< workspaces ──< artifacts ──< artifact_versions ──< source_locations ──< citations
+                                    └── validation_results      └── evidence_claims ── answer_audits
+```
+
+* **Artifact** — the thing: content hash, owner, branch, release, classification,
+  access policy, lifecycle state.
+* **ArtifactVersion** — one immutable revision: version label, size, `storage_uri`,
+  extractor name/version, extraction confidence.
+* **SourceLocation** — the *address* of a passage (`pdf_page`, `arxml_xpath`,
+  `source_symbol`, `test_case`, `row_range`, `json_pointer`) with page, section, line,
+  release and module.
+* **Citation** — binds a claim to a location *and* to the answer it supports.
+* **EvidenceClaim** — one claim with its type (fact / interpretation / assumption /
+  recommendation) and its answerability status.
+* **AnswerAudit** — what was asked, what was answered, with which status, scope,
+  citations, tool calls, model route and latency.
+
+Migrations are ordered, idempotent and portable (`src/registry/migrations/*.sql` +
+`schema_version` table with a checksum). Editing an already-applied migration raises
+`MigrationError` — you add a new one. The DDL is written once and runs on both SQLite
+(dev) and PostgreSQL (production), see ADR-0010.
+
+New additive API (the 47 v1 routes are unchanged):
+
+| Route | Purpose |
+|---|---|
+| `GET /api/v2/registry/health` | registry status + applied schema version (503 when `ASRBRAIN_REGISTRY_ENABLED=false`) |
+| `POST/GET /api/v2/registry/projects`, `/workspaces`, `/artifacts`, `/artifact-versions`, `/source-locations`, `/citations` | the registry spine |
+| `GET/POST /api/v2/jobs`, `GET /api/v2/jobs/{job_id}` | background jobs: enqueue, list with counts, inspect |
+
+Run the worker with `python -m apps.worker` (off by default;
+`ASRBRAIN_WORKER_ENABLED=true`). A failing job never kills the worker.
+
+**Stack decisions** (ADRs 0010–0014): PostgreSQL is the system of record with SQLite as
+the dev adapter and portable DDL; **FalkorDB** (LGPL-3.0) is the production graph
+adapter behind the `GraphStore` protocol; object storage is the **S3 API**, never MinIO
+the product; **BGE-M3** locally via Ollama is the dense model (the `tfidf` default does
+not change until the evaluation harness proves it better); and LlamaIndex/LangChain are
+**not** the orchestration core — the repo's own deterministic staged pipeline is the
+evidence-first backbone. Full reasoning in `docs/architecture/adr/`.
+
 ## Architecture
 
 ```

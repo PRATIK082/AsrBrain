@@ -16,6 +16,21 @@ old one.
 | [0007](0007-graph-store-interface.md) | Graph behind an interface: local SQLite now, Neo4j/RDF as an adapter | accepted | 2026-10-21 |
 | [0008](0008-react-is-the-product-surface.md) | React is the product surface; Streamlit enters maintenance mode | accepted | 2026-10-21 |
 | [0009](0009-local-first-model-routing.md) | Local-first model routing with a default-deny data policy | accepted | 2026-10-21 |
+| [0010](0010-postgresql-as-system-of-record.md) | PostgreSQL is the system of record; SQLite stays the dev adapter | accepted | 2026-10-21 |
+| [0011](0011-falkordb-graph-adapter.md) | FalkorDB is the production graph adapter | accepted | 2026-10-21 |
+| [0012](0012-s3-api-not-minio.md) | Depend on the S3 API, not on MinIO the product | accepted | 2026-10-21 |
+| [0013](0013-decline-llamaindex-langchain.md) | LlamaIndex / LangChain are not the orchestration core | accepted | 2026-10-21 |
+| [0014](0014-bge-m3-local-embeddings.md) | BGE-M3 locally via Ollama for dense retrieval | accepted | 2026-10-21 |
+
+## Superseded wording
+
+* **ADR-0007** named "Neo4j/RDF" as the production graph adapter; that choice is
+  made in [ADR-0011](0011-falkordb-graph-adapter.md) (FalkorDB). The
+  `GraphStore` protocol from ADR-0007 is unchanged.
+* **ADR-0003** said "stay on SQLite"; that is refined, not reversed, by
+  [ADR-0010](0010-postgresql-as-system-of-record.md) — SQLite is the dev
+  adapter, PostgreSQL is the system of record, and the migrations are portable
+  so the DDL is written once.
 
 ## Template
 

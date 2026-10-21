@@ -34,7 +34,17 @@ def test_staged_event_sequence_mocked_llm():
 
 def test_api_chat_answers_directly_single_release_corpus():
     c = TestClient(app)
-    r = c.post("/api/chat", json={"message": "What is the purpose of SOME/IP?", "skip_clarify": True})
+    # The chat path answers with a model by default, so this assertion used to
+    # depend on a live LLM (and failed intermittently in CI). The contract under
+    # test is "a single-release corpus is answered with citations".
+    orig = stages._generate
+    stages._generate = lambda q, e, comp, spec=None: {
+        "draft": "SOME/IP is the AUTOSAR service-oriented middleware protocol [E1].",
+        "llm": "mock"}
+    try:
+        r = c.post("/api/chat", json={"message": "What is the purpose of SOME/IP?", "skip_clarify": True})
+    finally:
+        stages._generate = orig
     assert r.status_code == 200
     d = r.json()
     assert d["needs_clarification"] is False

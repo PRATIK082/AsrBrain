@@ -59,6 +59,7 @@ class Settings:
     final_evidence: int = field(default_factory=lambda: int(_get("FINAL_EVIDENCE", "12")))
     rrf_k: int = field(default_factory=lambda: int(_get("RRF_K", "60")))
     canonical_db: str = field(default_factory=lambda: _get("CANONICAL_DB", "data/canonical/canonical.db"))
+    registry_db: str = field(default_factory=lambda: _get("REGISTRY_DB", "data/canonical/registry.db"))
     pdf_dir: str = field(default_factory=lambda: _get("PDF_DIR", "pdf"))
     qdrant_url: str = field(default_factory=lambda: _get("QDRANT_URL", "http://localhost:6333"))
     qdrant_collection: str = field(default_factory=lambda: _get("QDRANT_COLLECTION", "autosar_chunks"))
@@ -70,6 +71,11 @@ class Settings:
     cloud_routing_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_CLOUD_ROUTING_ENABLED", "false").lower() == "true")
     strict_local_only: bool = field(default_factory=lambda: _get("ASRBRAIN_STRICT_LOCAL_ONLY", "true").lower() == "true")
     vendor_plugins_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_VENDOR_PLUGINS_ENABLED", "false").lower() == "true")
+    # Phase 2: provenance-first registry + background worker
+    registry_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_REGISTRY_ENABLED", "true").lower() == "true")
+    worker_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_WORKER_ENABLED", "false").lower() == "true")
+    worker_poll_interval_s: float = field(default_factory=lambda: float(_get("ASRBRAIN_WORKER_POLL_INTERVAL_S", "1.0")))
+    worker_max_iterations: int = field(default_factory=lambda: int(_get("ASRBRAIN_WORKER_MAX_ITERATIONS", "0")))
 
 
 settings = Settings()

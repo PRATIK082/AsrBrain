@@ -255,13 +255,28 @@ A new SQLite file `data/canonical/registry.db` with ordered, idempotent SQL migr
 `Project`/`Workspace`/`Artifact`/`ArtifactVersion`/`SourceLocation`/`Citation`/
 `EvidenceClaim`/`ValidationResult`/`Job`/`AnswerAudit` land in Phase 2.
 
+**The DDL is portable and written once** (ADR-0010): PostgreSQL 16 is the system of
+record, SQLite is the development adapter. Phase 2 ships the SQLite adapter and the
+migration framework; the PostgreSQL adapter arrives in Phase 3+ against the same
+migrations, so no schema is ever written twice. The existing `canonical.db` chunk store
+is **not** migrated — it stays the retrieval source of truth (ADR-0002, dual-read
+single-write).
+
 ### 6.2 Object store
 
-The filesystem is the object store: `pdf/`, `pdf/uploads/`, `data/sources/`,
-`data/graphs/`, `data/reports/`. Every file gets a content hash, a source URI, an
+The filesystem is the object store in development: `pdf/`, `pdf/uploads/`, `data/sources/`,
+`data/objects/` (content-addressed). Every file gets a content hash, a source URI, an
 upload timestamp, an owner, a project, a branch, a release and an access policy. The
-registry stores the metadata; the bytes stay where they are. A later S3/Azure adapter
-implements the same `ObjectStore` protocol.
+registry stores the metadata; the bytes stay where they are.
+
+**The product depends on the S3 API, never on MinIO the product** (ADR-0012). Phase 3
+introduces a narrow `ObjectStore` protocol (`put/get/exists/stat/delete/presigned_url`)
+with two implementations: `LocalObjectStore` (content-addressed under
+`data/objects/<sha256[0:2]>/<sha256>`) and `S3ObjectStore` (configured by
+`OBJECT_STORE_*`). MinIO, Ceph RGW, SeaweedFS, Garage or hosted S3 are deployment
+targets; none of them is a code dependency, so the AGPL obligation never attaches to
+this project. The object store holds **bytes only** — all metadata, provenance and policy
+live in the relational registry, so a lost bucket can never mean lost provenance.
 
 ### 6.3 Vector retrieval
 
@@ -271,6 +286,16 @@ contract, which `src/indexing/collections.py::payload_for()` already defines and
 **must be extended** with `artifact_id`, `artifact_version_id`, `source_type`,
 `language` and `source_location_id`. The existing default-deny tenant filter in
 `qdrant_index.build_mandatory_filter()` becomes the shared policy.
+
+**Dense embeddings are BGE-M3, served locally by Ollama** (ADR-0014). The default
+`embedding_backend` stays `tfidf` until the evaluation harness proves the new backend
+better on our corpus — the switch is a flag plus a recorded measurement, never a silent
+change. Hybrid stays hybrid: dense is added *alongside* BM25 and the exact-keyword
+modality indexes, because technical identifiers (`SWS_CanIf_00123`, `Com_SignalTransmit`)
+are matched lexically and dense models mangle them. Fusion stays RRF (`rrf_k=60`).
+In production the vectors live in **pgvector inside PostgreSQL** (ADR-0010) — one
+service fewer than a separate vector DB. The index stores the model name and dimension
+so a model change forces a rebuild instead of a silent mismatch.
 
 ### 6.4 Model routing
 
@@ -294,6 +319,29 @@ Long-running work (ingestion, re-indexing, ARXML parsing, report rendering) move
 `Job` rows processed by a worker, so the API never blocks and the UI can show real
 progress. Phase 2 delivers the table and a simple in-process worker; the `jobs` API is
 additive (`GET /api/v2/jobs/{id}`).
+
+### 6.7 Stack decision summary
+
+The infrastructure stack was chosen with the product owner on 2026-10-21 and is
+recorded in ADRs 0010–0014. The rule behind all of them: **depend on the protocol, not
+on the server** — a deployment target may change without touching the evidence model.
+
+| Concern | Decision | Dev | Production | ADR |
+|---|---|---|---|---|
+| Relational store / system of record | PostgreSQL 16, portable DDL | SQLite adapter (`data/canonical/registry.db`) | PostgreSQL 16 | 0010 |
+| Graph | Typed property graph behind `GraphStore` | SQLite implementation | **FalkorDB** (LGPL-3.0) | 0011 |
+| Object / binary storage | S3 API | content-addressed local filesystem | MinIO / Ceph RGW / S3 | 0012 |
+| Orchestration & ingestion | Our own deterministic staged pipeline | same | same | 0013 |
+| Dense embeddings | BGE-M3 (MIT) via local Ollama | `tfidf` until the eval harness proves otherwise | BGE-M3 + BM25 hybrid, vectors in pgvector | 0014 |
+| Job queue | `Job` rows, worker process | SQLite | PostgreSQL `LISTEN/NOTIFY` + `SKIP LOCKED` | 0010 |
+| Model serving | Local-first, default-deny | Ollama | Ollama / OpenAI-compatible, policy-driven | 0009 |
+
+**Not adopted:** LlamaIndex and LangChain as the orchestration or ingestion core
+(ADR-0013) — the existing `run_staged` pipeline, the clarify gate, the citation
+verifier and the UI event contract are the evidence-first backbone, and replacing them
+would make "no invented evidence" a configuration setting instead of code. If a
+framework is introduced later it must terminate at our own model boundary: a connector
+may produce `Artifact`/`ArtifactVersion`/`SourceLocation` records, never answers.
 
 ---
 

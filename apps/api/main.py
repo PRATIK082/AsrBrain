@@ -835,3 +835,244 @@ def api_v2_answerability(conversation_id: str, message_index: int):
         headers={"X-AsrBrain-Reason": "answerability-gate-not-implemented"},
     )
 
+
+# ---------------- v2: provenance registry + background jobs ----------------
+# Additive only (ADR-0002, ADR-0003). The registry lives in its own SQLite file
+# (`data/canonical/registry.db`) so the canonical corpus store is never touched.
+
+class ProjectCreate(BaseModel):
+    id: str = ""
+    name: str
+    description: str = ""
+    owner: str = ""
+    data_classification: str = "internal"
+
+
+class WorkspaceCreate(BaseModel):
+    id: str = ""
+    project_id: str
+    name: str
+    description: str = ""
+    scope: str = ""
+
+
+class ArtifactCreate(BaseModel):
+    id: str = ""
+    project_id: str
+    workspace_id: str = ""
+    kind: str = "external"
+    name: str
+    source_uri: str = ""
+    content_hash: str = ""
+    owner: str = ""
+    branch: str = ""
+    autosar_release: str = ""
+    data_classification: str = "internal"
+
+
+class ArtifactVersionCreate(BaseModel):
+    id: str = ""
+    artifact_id: str
+    version_label: str = ""
+    content_hash: str = ""
+    size_bytes: int = 0
+    storage_uri: str = ""
+    source_uri: str = ""
+    extractor_name: str = ""
+    extractor_version: str = ""
+    extraction_confidence: float = 1.0
+
+
+class SourceLocationCreate(BaseModel):
+    id: str = ""
+    artifact_version_id: str
+    locator_type: str = "pdf_page"
+    locator: str
+    page_start: int | None = None
+    page_end: int | None = None
+    section: str = ""
+    line_start: int | None = None
+    line_end: int | None = None
+    release: str = ""
+    module: str = ""
+    snippet: str = ""
+
+
+class CitationCreate(BaseModel):
+    id: str = ""
+    source_location_id: str
+    answer_id: str = ""
+    conversation_id: str = ""
+    message_id: str = ""
+    artifact_version_id: str = ""
+    label: str = ""
+    claim: str = ""
+
+
+class JobCreate(BaseModel):
+    id: str = ""
+    kind: str
+    payload: dict = {}
+    priority: int = 0
+    max_attempts: int = 3
+    project_id: str = ""
+    workspace_id: str = ""
+    artifact_version_id: str = ""
+
+
+def _registry():
+    """Lazily build the registry store (migrations run on first use)."""
+    from src.registry.store import RegistryStore
+    return RegistryStore(settings.registry_db)
+
+
+def _jobs():
+    from src.registry.jobs import JobStore
+    return JobStore(settings.registry_db)
+
+
+@app.get("/api/v2/registry/health")
+def api_v2_registry_health():
+    """Registry reachability and applied schema version."""
+    if not settings.registry_enabled:
+        raise HTTPException(503, "registry is disabled (ASRBRAIN_REGISTRY_ENABLED=false)")
+    from src.registry.migrator import current_version
+    # Touch the store first so the migrations are applied before we report.
+    _registry().close()
+    return {
+        "enabled": True,
+        "registry_db": settings.registry_db,
+        "schema_version": current_version(settings.registry_db),
+    }
+
+
+@app.post("/api/v2/registry/projects")
+def api_v2_registry_create_project(req: ProjectCreate):
+    store = _registry()
+    try:
+        return store.create_project(
+            project_id=req.id, name=req.name, description=req.description,
+            owner=req.owner, data_classification=req.data_classification)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/projects")
+def api_v2_registry_list_projects():
+    return {"projects": _registry().list_projects()}
+
+
+@app.post("/api/v2/registry/workspaces")
+def api_v2_registry_create_workspace(req: WorkspaceCreate):
+    try:
+        return _registry().create_workspace(
+            workspace_id=req.id, project_id=req.project_id, name=req.name,
+            description=req.description, scope=req.scope)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/workspaces")
+def api_v2_registry_list_workspaces(project_id: str = ""):
+    return {"workspaces": _registry().list_workspaces(project_id=project_id)}
+
+
+@app.post("/api/v2/registry/artifacts")
+def api_v2_registry_register_artifact(req: ArtifactCreate):
+    try:
+        return _registry().register_artifact(
+            artifact_id=req.id, project_id=req.project_id, workspace_id=req.workspace_id,
+            kind=req.kind, name=req.name, source_uri=req.source_uri,
+            content_hash=req.content_hash, owner=req.owner, branch=req.branch,
+            autosar_release=req.autosar_release,
+            data_classification=req.data_classification)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/artifacts")
+def api_v2_registry_list_artifacts(project_id: str = "", kind: str = ""):
+    return {"artifacts": _registry().list_artifacts(project_id=project_id, kind=kind)}
+
+
+@app.post("/api/v2/registry/artifact-versions")
+def api_v2_registry_create_artifact_version(req: ArtifactVersionCreate):
+    try:
+        return _registry().create_artifact_version(
+            version_id=req.id, artifact_id=req.artifact_id,
+            version_label=req.version_label, content_hash=req.content_hash,
+            size_bytes=req.size_bytes, storage_uri=req.storage_uri,
+            source_uri=req.source_uri, extractor_name=req.extractor_name,
+            extractor_version=req.extractor_version,
+            extraction_confidence=req.extraction_confidence)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/artifact-versions")
+def api_v2_registry_list_artifact_versions(artifact_id: str = ""):
+    return {"artifact_versions": _registry().list_artifact_versions(artifact_id=artifact_id)}
+
+
+@app.post("/api/v2/registry/source-locations")
+def api_v2_registry_add_source_location(req: SourceLocationCreate):
+    try:
+        return _registry().add_source_location(
+            location_id=req.id, artifact_version_id=req.artifact_version_id,
+            locator_type=req.locator_type, locator=req.locator,
+            page_start=req.page_start, page_end=req.page_end, section=req.section,
+            line_start=req.line_start, line_end=req.line_end, release=req.release,
+            module=req.module, snippet=req.snippet)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/source-locations")
+def api_v2_registry_list_source_locations(artifact_version_id: str = ""):
+    return {"source_locations": _registry().list_source_locations(
+        artifact_version_id=artifact_version_id)}
+
+
+@app.post("/api/v2/registry/citations")
+def api_v2_registry_add_citation(req: CitationCreate):
+    try:
+        return _registry().add_citation(
+            citation_id=req.id, source_location_id=req.source_location_id,
+            answer_id=req.answer_id, conversation_id=req.conversation_id,
+            message_id=req.message_id, artifact_version_id=req.artifact_version_id,
+            label=req.label, claim=req.claim)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/registry/citations")
+def api_v2_registry_list_citations(answer_id: str = ""):
+    return {"citations": _registry().list_citations(answer_id=answer_id)}
+
+
+@app.get("/api/v2/jobs")
+def api_v2_jobs_list(status: str = "", kind: str = "", limit: int = 50):
+    return {"jobs": _jobs().list(status=status, kind=kind, limit=limit),
+            "counts": _jobs().counts()}
+
+
+@app.post("/api/v2/jobs")
+def api_v2_jobs_enqueue(req: JobCreate):
+    try:
+        return _jobs().enqueue(
+            req.kind, payload=req.payload, priority=req.priority,
+            max_attempts=req.max_attempts, project_id=req.project_id,
+            workspace_id=req.workspace_id,
+            artifact_version_id=req.artifact_version_id, job_id=req.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/v2/jobs/{job_id}")
+def api_v2_jobs_get(job_id: str):
+    job = _jobs().get(job_id)
+    if job is None:
+        raise HTTPException(404, f"job not found: {job_id}")
+    return job
+
+
