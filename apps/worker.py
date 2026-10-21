@@ -26,14 +26,53 @@ from src.registry.jobs import Job, JobStore, run_worker
 def _echo_handler(job: Job) -> dict:
     """Default handler: records that the job was observed.
 
-    Real handlers (artifact ingestion, ARXML extraction, embedding) arrive in
-    Phase 3. This one exists so the queue path is exercisable end to end.
+    This one exists so the queue path is exercisable end to end.
     """
     return {"ok": True, "kind": job.kind, "echo": True}
 
 
+def _artifact_ingest_handler(job: Job) -> dict:
+    """Register one source file in the provenance registry.
+
+    The bytes go to the object store, the artifact and one immutable version
+    are registered, and every indexed chunk of that file gets a source
+    location so a citation can be bound to an exact passage.
+    """
+    from src.ingestion.registry_ingest import ingest_document
+    from src.objects import default_object_store
+    from src.registry import RegistryStore
+
+    payload = job.payload or {}
+    path = str(payload.get("path") or "")
+    project_id = str(payload.get("project_id") or "")
+    if not path or not project_id:
+        raise ValueError("artifact.ingest requires 'path' and 'project_id'")
+
+    registry = RegistryStore(settings.registry_db)
+    try:
+        result = ingest_document(
+            registry,
+            default_object_store(),
+            path=path,
+            project_id=project_id,
+            name=str(payload.get("name") or ""),
+            kind=str(payload.get("kind") or "spec"),
+            canonical_db=str(payload.get("canonical_db") or settings.canonical_db),
+            workspace_id=str(payload.get("workspace_id") or ""),
+            owner=str(payload.get("owner") or ""),
+            branch=str(payload.get("branch") or ""),
+            autosar_release=str(payload.get("autosar_release") or ""),
+            data_classification=str(payload.get("data_classification") or "internal"),
+            version_label=str(payload.get("version_label") or ""),
+        )
+    finally:
+        registry.close()
+    return {"ok": True, **result}
+
+
 HANDLERS: dict[str, Callable[[Job], dict]] = {
     "echo": _echo_handler,
+    "artifact.ingest": _artifact_ingest_handler,
 }
 
 

@@ -255,6 +255,44 @@ not change until the evaluation harness proves it better); and LlamaIndex/LangCh
 **not** the orchestration core — the repo's own deterministic staged pipeline is the
 evidence-first backbone. Full reasoning in `docs/architecture/adr/`.
 
+## Object store and artifact-scoped ingestion (Phase 3)
+
+The registry says *where* a passage came from; the object store holds the bytes.
+They are deliberately separate: the store keeps **bytes only**, and every piece
+of metadata — content hash, owner, project, branch, release, classification,
+access policy, lifecycle state — lives in the relational registry, so a lost
+bucket never means lost provenance.
+
+```
+file bytes ──► ObjectStore.put() ──► local://<sha256>     (bytes only)
+                 ├─► Artifact            (the thing: hash, owner, branch, release, policy)
+                 └─► ArtifactVersion     (one immutable revision: extractor, confidence, storage_uri)
+                         └─► SourceLocation × N   (one per indexed chunk: pdf://<doc>/page/<n>)
+                                   └─► Citation   (an answer's claim → that exact passage)
+```
+
+* `src/objects/store.py` — the `ObjectStore` protocol (`put/get/exists/stat/
+  delete/presigned_url`), a content-addressed `LocalObjectStore` and an
+  `S3ObjectStore` that speaks the **S3 API** (so MinIO, Ceph RGW, SeaweedFS,
+  Garage or hosted S3 are deployment choices, not code dependencies).
+  Selected with `OBJECT_STORE_BACKEND=local|s3`.
+* `src/ingestion/registry_ingest.py` — `ingest_document()` registers the
+  artifact and one `SourceLocation` per canonical chunk. **The canonical store
+  is read, never written.** Chunks are matched to their file by the document's
+  SHA-256.
+* `bind_citations()` resolves an answer's evidence to the exact registered
+  location. Evidence it cannot resolve is reported as **unresolved** — never
+  bound to a guessed passage.
+
+| Route | Behaviour |
+|---|---|
+| `POST /api/v2/registry/ingest` | Enqueues an `artifact.ingest` job → `{queued, job}`. `503` when the registry is disabled, `400` without `path`/`project_id`. |
+| `POST /api/v2/registry/citations/bind` | Binds an answer's evidence to source locations → `{answer_id, citations, unresolved, bound, unresolved_count}`. |
+
+Migration `007_source_location_chunk.sql` adds `chunk_id` to `source_locations`
+(additive, portable, forward-only). Design and rollback: `docs/architecture/
+phase-3-implementation-plan.md`.
+
 ## Architecture
 
 ```

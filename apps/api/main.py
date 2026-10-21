@@ -1076,3 +1076,79 @@ def api_v2_jobs_get(job_id: str):
     return job
 
 
+# ---------------- v2: artifact-scoped ingestion (Phase 3) ----------------
+# Thin by design: the route enqueues work, the worker performs it. The
+# canonical store is only read; the registry receives the provenance.
+
+
+class IngestRequest(BaseModel):
+    path: str
+    project_id: str
+    name: str = ""
+    kind: str = "spec"
+    workspace_id: str = ""
+    owner: str = ""
+    branch: str = ""
+    autosar_release: str = ""
+    data_classification: str = "internal"
+    version_label: str = ""
+    canonical_db: str = ""
+
+
+class BindCitationsRequest(BaseModel):
+    answer_id: str
+    evidence: list[dict] = []
+    conversation_id: str = ""
+    message_id: str = ""
+    artifact_version_id: str = ""
+
+
+@app.post("/api/v2/registry/ingest")
+def api_v2_registry_ingest(req: IngestRequest):
+    """Queue an artifact for registration in the provenance registry.
+
+    Returns the queued job. The worker (``python -m apps.worker``) performs
+    the ingest: bytes to the object store, artifact + version to the registry,
+    one source location per indexed chunk.
+    """
+    if not settings.registry_enabled:
+        raise HTTPException(503, "the registry is disabled (ASRBRAIN_REGISTRY_ENABLED=false)")
+    if not req.path or not req.project_id:
+        raise HTTPException(400, "path and project_id are required")
+    payload = {
+        "path": req.path,
+        "project_id": req.project_id,
+        "name": req.name,
+        "kind": req.kind,
+        "workspace_id": req.workspace_id,
+        "owner": req.owner,
+        "branch": req.branch,
+        "autosar_release": req.autosar_release,
+        "data_classification": req.data_classification,
+        "version_label": req.version_label,
+        "canonical_db": req.canonical_db or settings.canonical_db,
+    }
+    try:
+        job = _jobs().enqueue(
+            "artifact.ingest", payload=payload, priority=0, max_attempts=3,
+            project_id=req.project_id, workspace_id=req.workspace_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"queued": True, "job": job}
+
+
+@app.post("/api/v2/registry/citations/bind")
+def api_v2_registry_bind_citations(req: BindCitationsRequest):
+    """Bind an answer's evidence to registered source locations.
+
+    Evidence that has no registered location is reported as unresolved - it is
+    never bound to a guessed passage.
+    """
+    from src.ingestion.registry_ingest import bind_citations
+    try:
+        return bind_citations(
+            _registry(), req.answer_id, req.evidence,
+            conversation_id=req.conversation_id, message_id=req.message_id,
+            artifact_version_id=req.artifact_version_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))

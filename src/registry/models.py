@@ -103,6 +103,7 @@ class SourceLocation(_Base):
     release: str = ""
     module: str = ""
     snippet: str = ""
+    chunk_id: str = ""
     created_at: str = ""
 
 

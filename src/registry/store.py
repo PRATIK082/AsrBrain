@@ -256,16 +256,17 @@ class RegistryStore:
                             location_id: str = "", page_start: int | None = None,
                             page_end: int | None = None, section: str = "",
                             line_start: int | None = None, line_end: int | None = None,
-                            release: str = "", module: str = "",                             snippet: str = "") -> SourceLocation:
+                            release: str = "", module: str = "",
+                            snippet: str = "", chunk_id: str = "") -> SourceLocation:
         if self.get_artifact_version(artifact_version_id) is None:
             raise ValueError(f"unknown artifact version: {artifact_version_id}")
         lid = location_id or _id("loc")
         self._conn.execute(
             "INSERT INTO source_locations(id, artifact_version_id, locator_type, locator,"
-            " page_start, page_end, section, line_start, line_end, release, module, snippet, created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " page_start, page_end, section, line_start, line_end, release, module, snippet,"
+            " chunk_id, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (lid, artifact_version_id, locator_type, locator, page_start, page_end, section,
-             line_start, line_end, release, module, snippet, _now()),
+             line_start, line_end, release, module, snippet, chunk_id, _now()),
         )
         self._conn.commit()
         loc = self.get_source_location(lid)
@@ -283,8 +284,29 @@ class RegistryStore:
             page_start=row["page_start"], page_end=row["page_end"], section=row["section"],
             line_start=row["line_start"], line_end=row["line_end"],
             release=row["release"], module=row["module"], snippet=row["snippet"],
+            chunk_id=row["chunk_id"] or "",
             created_at=row["created_at"],
         )
+
+    def find_source_location_by_chunk(self, chunk_id: str,
+                                       artifact_version_id: str = "") -> SourceLocation | None:
+        """The exact source location of a retrieval chunk, if one was registered.
+
+        Citations bind through this lookup so a citation can never point at a
+        passage the retriever did not actually use.
+        """
+        if not chunk_id:
+            return None
+        sql = "SELECT id FROM source_locations WHERE chunk_id=?"
+        params: list = [chunk_id]
+        if artifact_version_id:
+            sql += " AND artifact_version_id=?"
+            params.append(artifact_version_id)
+        sql += " ORDER BY created_at, id LIMIT 1"
+        row = self._conn.execute(sql, params).fetchone()
+        if row is None:
+            return None
+        return self.get_source_location(row["id"])
 
     def list_source_locations(self, artifact_version_id: str = "") -> list[SourceLocation]:
         if artifact_version_id:
