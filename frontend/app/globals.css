@@ -238,6 +238,94 @@
   .md tbody tr:hover {
     @apply bg-ink-800/40;
   }
+
+  /* ---------------------------------------------------------------- *
+   * Workspace shell — left navigation
+   * ---------------------------------------------------------------- */
+
+  .nav-item {
+    @apply flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-muted transition-colors hover:bg-ink-800/70 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60;
+  }
+
+  .nav-item-active {
+    @apply bg-ink-800 text-fg ring-1 ring-inset ring-accent/30;
+  }
+
+  .nav-group-label {
+    @apply px-2.5 pb-1 pt-3 text-2xs font-semibold uppercase tracking-widest text-faint;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Evidence drawer (right rail)
+   * ---------------------------------------------------------------- */
+
+  .drawer {
+    @apply flex h-full flex-col border-l border-edge/70 bg-ink-900/95 backdrop-blur;
+  }
+
+  .drawer-header {
+    @apply flex items-center justify-between gap-2 border-b border-edge/70 px-4 py-3;
+  }
+
+  .drawer-body {
+    @apply scrollbar-thin flex-1 overflow-y-auto px-4 py-3;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Answer card sections
+   * ---------------------------------------------------------------- */
+
+  .answer-section {
+    @apply border-t border-edge/50;
+  }
+
+  .section-toggle {
+    @apply flex w-full items-center gap-2 px-1 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Evidence references
+   * ---------------------------------------------------------------- */
+
+  .evidence-ref {
+    @apply inline-flex cursor-pointer items-center gap-1 rounded border border-edge/70 bg-ink-800/70 px-1.5 py-0.5 font-mono text-2xs text-accent transition-colors hover:border-accent/60 hover:bg-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Empty states
+   * ---------------------------------------------------------------- */
+
+  .empty-state {
+    @apply flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-edge/70 bg-ink-900/40 px-6 py-10 text-center;
+  }
+
+  .empty-state-cta {
+    @apply btn btn-primary;
+  }
+
+  .kbd-hint {
+    @apply rounded border border-edge/70 bg-ink-800 px-1.5 py-0.5 font-mono text-2xs text-faint;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Answerability status badges
+   * ---------------------------------------------------------------- */
+
+  .status-verified {
+    @apply inline-flex items-center gap-1 rounded border border-status-verified/50 bg-status-verified/10 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-status-verified;
+  }
+
+  .status-supported {
+    @apply inline-flex items-center gap-1 rounded border border-status-supported/50 bg-status-supported/10 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-status-supported;
+  }
+
+  .status-review {
+    @apply inline-flex items-center gap-1 rounded border border-status-review/50 bg-status-review/10 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-status-review;
+  }
+
+  .status-insufficient {
+    @apply inline-flex items-center gap-1 rounded border border-status-insufficient/50 bg-status-insufficient/10 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-status-insufficient;
+  }
 }
 
 @layer utilities {

@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest fastapi httpx
+
+      - name: Compile check
+        run: python -m compileall -q src apps
+
+      - name: Unit + integration tests
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (typecheck + build + design system)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: npx next build
+
+      # The Tailwind pipeline was silently inert once (tailwindcss was a
+      # devDependency with no config, no postcss config and no globals.css).
+      # Every utility class rendered as plain HTML and nothing failed loudly.
+      # This step fails the build if the design system is not actually emitted.
+      - name: Design system is actually compiled
+        run: |
+          set -euo pipefail
+          CSS=$(find .next/static/css -name '*.css' | head -n 1)
+          if [ -z "$CSS" ]; then
+            echo "no compiled stylesheet found — the Tailwind/PostCSS pipeline did not run"
+            exit 1
+          fi
+          for cls in nav-item status-verified status-insufficient evidence-ref drawer empty-state panel btn-primary; do
+            if ! grep -q "$cls" "$CSS"; then
+              echo "missing design-system class in $CSS: .$cls"
+              exit 1
+            fi
+          done
+          echo "design system verified in $CSS"
+
+  security:
+    name: Security (secrets and dependency audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependency audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit -r requirements.txt || echo "pip-audit reported findings (see log)"
+
+      - name: No credentials committed
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Ei '(^|/)(\.env|.*\.pem|.*\.key|id_rsa)$' | grep -v '\.env\.example$'; then
+            echo "a secret-looking file is tracked in git"
+            exit 1
+          fi
+          echo "no tracked secret files"

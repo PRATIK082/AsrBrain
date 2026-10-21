@@ -1,7 +1,9 @@
 import type {
+  Answerability,
   AssistantCapabilities,
   ChatRequest,
   DiagnoseResult,
+  ModuleCatalogue,
   ProjectOverview,
   StarterPromptGroup,
   StreamEvent,
@@ -59,7 +61,35 @@ export const api = {
     base_url?: string;
     api_key?: string;
   }) => json<DiagnoseResult>("/api/assistant/diagnose", { method: "POST", body: JSON.stringify(body) }),
+
+  /* ---------------- workspace shell (v2) ---------------- */
+
+  /** The workspace module catalogue (Chat, Knowledge, ARXML Explorer, …). */
+  listModules: () => json<ModuleCatalogue>("/api/v2/modules"),
+
+  /**
+   * The evidence-first answerability contract for one stored answer.
+   * Rejects with an `AnswerabilityUnavailableError` until the gate exists
+   * (Phase 5) — the UI must never invent a status.
+   */
+  getAnswerability: async (conversationId: string, messageIndex: number): Promise<Answerability> => {
+    const r = await fetch(`${BASE}/api/v2/answerability/${encodeURIComponent(conversationId)}/${messageIndex}`);
+    if (r.status === 501) {
+      const body = (await r.json().catch(() => ({}))) as { reason?: string };
+      throw new AnswerabilityUnavailableError(body.reason ?? "answerability gate not implemented yet");
+    }
+    if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`);
+    return (await r.json()) as Answerability;
+  },
 };
+
+/** Thrown when the answerability gate is not available yet (HTTP 501). */
+export class AnswerabilityUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnswerabilityUnavailableError";
+  }
+}
 
 /** SSE reader for POST /api/chat/stream — yields parsed StreamEvents. */
 export async function* streamChat(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamEvent> {

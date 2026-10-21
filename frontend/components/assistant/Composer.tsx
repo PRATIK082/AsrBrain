@@ -98,9 +98,15 @@ export function Composer({
           )}
         </div>
         <p className="mt-1.5 text-2xs text-faint">
-          {mode === "diagnose"
-            ? "Diagnose mode classifies the symptom, retrieves the governing passages and proposes checks and candidate fixes."
-            : "Enter to send · Shift+Enter for a new line · every claim is cited to a document and page."}
+          {mode === "diagnose" ? (
+            "Diagnose mode classifies the symptom, retrieves the governing passages and proposes checks and candidate fixes."
+          ) : (
+            <>
+              <kbd className="kbd-hint">Enter</kbd> to send ·{" "}
+              <kbd className="kbd-hint">Shift+Enter</kbd> for a new line · every claim is
+              cited to a document and page.
+            </>
+          )}
         </p>
       </div>
     </div>

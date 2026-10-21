@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAssistant, type ScopeState } from "../../hooks/useAssistant";
+import type { SourceEvidence } from "../../lib/types";
 import { AssistantMessage } from "./AssistantMessage";
 import { Composer } from "./Composer";
 import { ConversationSidebar } from "./ConversationSidebar";
@@ -40,14 +41,36 @@ const DEFAULT_SCOPE: ScopeState = {
   modules: [],
 };
 
+interface ShellProps {
+  /** Controlled surface (the workspace left nav owns navigation when set). */
+  surface?: string;
+  onSurfaceChange?: (surface: string) => void;
+  /** Opens the evidence drawer at the exact source location of a citation. */
+  onSelectEvidence?: (evidence: SourceEvidence) => void;
+  /** Hides the in-sidebar product header and the surface switcher. */
+  hideHeader?: boolean;
+  hideSurfaces?: boolean;
+}
+
 /**
  * The product shell: conversation rail, working surface and the knowledge
  * rail. Every surface shares one scope (mode, model, release/module filter)
  * so the user always knows what shaped the result.
  */
-export function AssistantShell() {
+export function AssistantShell({
+  surface: controlledSurface,
+  onSurfaceChange,
+  onSelectEvidence,
+  hideHeader = false,
+  hideSurfaces = false,
+}: ShellProps = {}) {
   const a = useAssistant();
-  const [surface, setSurface] = useState("assistant");
+  const [localSurface, setLocalSurface] = useState("assistant");
+  const surface = controlledSurface ?? localSurface;
+  const setSurface = (id: string) => {
+    if (onSurfaceChange) onSurfaceChange(id);
+    else setLocalSurface(id);
+  };
   const [scope, setScope] = useState<ScopeState>(DEFAULT_SCOPE);
   const [input, setInput] = useState("");
   const [composerMode, setComposerMode] = useState<"ask" | "diagnose">("ask");
@@ -101,6 +124,7 @@ export function AssistantShell() {
         surface={surface}
         surfaces={surfaces}
         onSurface={setSurface}
+        hideHeader={hideHeader}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -113,6 +137,7 @@ export function AssistantShell() {
           surfaces={surfaces}
           showKnowledge={showKnowledge}
           onToggleKnowledge={() => setShowKnowledge((v) => !v)}
+          hideSurfaces={hideSurfaces}
         />
 
         {isAssistant ? (
@@ -134,6 +159,7 @@ export function AssistantShell() {
                       turn={t}
                       stageLabel={a.stageLabel}
                       onFollowup={(q) => void send(q)}
+                      onSelectEvidence={onSelectEvidence}
                     />
                   ))
                 )}

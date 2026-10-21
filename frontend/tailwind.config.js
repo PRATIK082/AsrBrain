@@ -38,6 +38,13 @@ module.exports = {
         warn: "rgb(var(--warn) / <alpha-value>)",
         good: "rgb(var(--good) / <alpha-value>)",
         bad: "rgb(var(--bad) / <alpha-value>)",
+        /* Evidence-first answerability statuses (see docs/architecture/adr/0001). */
+        status: {
+          verified: "rgb(var(--good) / <alpha-value>)",
+          supported: "rgb(var(--accent) / <alpha-value>)",
+          review: "rgb(var(--warn) / <alpha-value>)",
+          insufficient: "rgb(var(--bad) / <alpha-value>)",
+        },
       },
       fontFamily: {
         sans: [

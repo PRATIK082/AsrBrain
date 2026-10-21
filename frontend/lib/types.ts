@@ -214,4 +214,83 @@ export interface AssistantTurn {
   diagnose?: DiagnoseResult;
   clarify?: { missing: string[]; question: string };
   pending?: boolean;
+  answerability?: Answerability;
 }
+
+/* ------------------------------------------------------------------ *
+ * Evidence-first answerability contract
+ * ------------------------------------------------------------------ */
+
+/**
+ * The user-facing answer contract. A numeric confidence is NOT a correctness
+ * claim and is never rendered as one — it stays inside the audit section.
+ */
+export type AnswerabilityStatus =
+  | "VERIFIED"
+  | "EVIDENCE_SUPPORTED"
+  | "NEEDS_ENGINEER_REVIEW"
+  | "INSUFFICIENT_EVIDENCE";
+
+export interface Answerability {
+  status: AnswerabilityStatus;
+  /** Plain-language reason for the status. Never empty. */
+  reason: string;
+  /** Artifacts / metadata that would be required to lift the status. */
+  missing: string[];
+  /** Conflicting evidence that must be reviewed by a human. */
+  conflicts: string[];
+  /** Which deterministic checks ran (e.g. "citation validity", "version match"). */
+  checked: string[];
+}
+
+/** The expandable sections of an answer card. */
+export type AnswerSectionId =
+  | "answer"
+  | "evidence"
+  | "reasoning"
+  | "assumptions"
+  | "tools"
+  | "exclusions"
+  | "audit";
+
+export interface EvidenceDrawerTarget {
+  label: string;
+  source_pdf: string;
+  page?: number;
+  page_end?: number;
+  section: string;
+  release: string;
+  platform: string;
+  module: string;
+  requirement_ids: string[];
+  snippet: string;
+  source_id: string;
+  relevance: number;
+}
+
+/* ------------------------------------------------------------------ *
+ * Workspace modules (/api/v2/modules)
+ * ------------------------------------------------------------------ */
+
+export type ModuleStatus = "available" | "partial" | "planned";
+
+export interface WorkspaceModule {
+  id: string;
+  title: string;
+  /** Target route inside the workspace. */
+  href: string;
+  status: ModuleStatus;
+  description: string;
+  /** What the module can do today, in one sentence. */
+  capability: string;
+  /** What is missing, when the module is not yet complete. */
+  missing: string;
+  /** Phase of the target architecture that completes the module. */
+  phase: string;
+}
+
+export interface ModuleCatalogue {
+  workspace: { id: string; title: string; project: string; scope: string };
+  modules: WorkspaceModule[];
+}
+

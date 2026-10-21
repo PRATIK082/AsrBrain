@@ -12,6 +12,8 @@ interface Props {
   surfaces: { id: string; title: string; description: string }[];
   showKnowledge?: boolean;
   onToggleKnowledge?: () => void;
+  /** The workspace left nav owns surface navigation. */
+  hideSurfaces?: boolean;
 }
 
 const MODES: { id: ChatMode; label: string }[] = [
@@ -55,6 +57,7 @@ export function ScopeBar({
   surfaces,
   showKnowledge,
   onToggleKnowledge,
+  hideSurfaces = false,
 }: Props) {
   const [theme, toggleTheme] = useTheme();
   const corpus = capabilities?.corpus;
@@ -141,7 +144,8 @@ export function ScopeBar({
 
       <div className="flex-1" />
 
-      {surface !== "assistant" &&
+      {!hideSurfaces &&
+        surface !== "assistant" &&
         surfaces.map((s) => (
           <button
             key={s.id}

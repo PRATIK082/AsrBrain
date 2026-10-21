@@ -12,6 +12,8 @@ interface Props {
   surface: string;
   surfaces: { id: string; title: string; description: string }[];
   onSurface: (id: string) => void;
+  /** The workspace shell owns the product header and the surface switcher. */
+  hideHeader?: boolean;
 }
 
 function when(ts?: number): string {
@@ -34,6 +36,7 @@ export function ConversationSidebar({
   surface,
   surfaces,
   onSurface,
+  hideHeader = false,
 }: Props) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState("");
@@ -46,35 +49,39 @@ export function ConversationSidebar({
 
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-edge/60 bg-ink-850/40">
-      <div className="flex items-center gap-2 border-b border-edge/60 px-3 py-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-sm font-bold text-accent">
-          AB
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-fg">AsrBrain</p>
-          <p className="truncate text-2xs uppercase tracking-wide text-faint">
-            Institutional AUTOSAR knowledge
-          </p>
-        </div>
-      </div>
+      {!hideHeader && (
+        <>
+          <div className="flex items-center gap-2 border-b border-edge/60 px-3 py-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-sm font-bold text-accent">
+              AB
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-fg">AsrBrain</p>
+              <p className="truncate text-2xs uppercase tracking-wide text-faint">
+                Institutional AUTOSAR knowledge
+              </p>
+            </div>
+          </div>
 
-      <div className="space-y-1 border-b border-edge/60 p-2">
-        {surfaces.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => onSurface(s.id)}
-            title={s.description}
-            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-              surface === s.id
-                ? "bg-accent/10 text-accent"
-                : "text-muted hover:bg-ink-800/70 hover:text-fg"
-            }`}
-          >
-            <span className="text-xs opacity-70">{s.id === "assistant" ? "◆" : "◇"}</span>
-            <span className="truncate">{s.title}</span>
-          </button>
-        ))}
-      </div>
+          <div className="space-y-1 border-b border-edge/60 p-2">
+            {surfaces.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => onSurface(s.id)}
+                title={s.description}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                  surface === s.id
+                    ? "bg-accent/10 text-accent"
+                    : "text-muted hover:bg-ink-800/70 hover:text-fg"
+                }`}
+              >
+                <span className="text-xs opacity-70">{s.id === "assistant" ? "◆" : "◇"}</span>
+                <span className="truncate">{s.title}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {surface === "assistant" && (
         <>

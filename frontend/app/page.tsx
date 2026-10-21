@@ -1,10 +1,5 @@
-"use client";
-import { AssistantShell } from "../components/assistant/AssistantShell";
+import { WorkspaceShell } from "../components/shell/WorkspaceShell";
 
-/**
- * The product entry point: an institutional, citation-grounded assistant over
- * the indexed AUTOSAR corpus.
- */
-export default function HomePage() {
-  return <AssistantShell />;
+export default function Page() {
+  return <WorkspaceShell />;
 }

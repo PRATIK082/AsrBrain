@@ -61,6 +61,19 @@ streamlit run apps/streamlit/app.py   # self-contained, works without API server
 # optional React: cd frontend && npm install && npm run dev   # needs API on :8000
 ```
 
+### Two UIs — which one am I looking at?
+
+The repository ships **two** front ends over the same `/api/` contract:
+
+| UI | Command | Status |
+|---|---|---|
+| **Streamlit chatbox** | `streamlit run apps/streamlit/app.py` | **legacy / maintenance mode** — the 7-tab chat, evidence, trace, graph, src, arxml and tokens view |
+| **React engineering workspace** | `cd frontend && npm run dev` (needs the API on :8000) | **the product surface** — left module nav, cited thread, answerability badges, evidence drawer, knowledge panel |
+
+The React app is the one being redesigned into the *AsrBrain Engineering Workspace*
+(see `docs/architecture/`). If you started the API and Streamlit only, you are looking at
+the legacy UI — start the React app to see the workspace.
+
 ## Quickstart
 
 ```bash
@@ -156,6 +169,42 @@ meta, so the source panel survives a reload.
 > pipeline is now wired and the design tokens live in `frontend/app/globals.css`.
 
 Design and rationale: `docs/institutional-assistant-ui-plan.md`.
+
+## Engineering workspace (Phase 1)
+
+`docs/architecture/` holds the redesign of AsrBrain into an **evidence-first engineering
+intelligence platform** (product: *AsrBrain Engineering Workspace*):
+
+| Document | Content |
+|---|---|
+| `docs/architecture/current-state.md` | repository map, the four request/data flows, what works, what is missing, 20 technical-debt items, 11 security/safety risks, the incremental-migration rules |
+| `docs/architecture/target-architecture.md` | the 9 product modules, the canonical entity model, the provenance rules, the answerability gate, the platform services, the 8 migration rules, P0–P8 phasing |
+| `docs/architecture/adr/` | 9 architecture decision records (answerability gates, provenance-first model, SQLite+igrations, typed graph, ARXML-as-structured-data, tool-first policy, graph-store interface, React-is-the-product, local-first routing) |
+| `docs/architecture/product-backlog.md` | Phases 1–8 as small, independently testable milestones with "done when" criteria |
+| `docs/architecture/phase-1-implementation-plan.md` | the Phase 1 plan **and** the as-built outcome, verification results, API changes, migration/rollback |
+
+**The answer contract.** The assistant does not publish a correctness percentage. Every
+answer carries one of four deterministic statuses:
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | a deterministic tool result and an authoritative source agree |
+| `EVIDENCE_SUPPORTED` | the cited sources support the answer; no deterministic validation applies |
+| `NEEDS_ENGINEER_REVIEW` | partial evidence, ambiguity, conflict or missing context |
+| `INSUFFICIENT_EVIDENCE` | not answered — the reply names exactly which artifact or metadata is missing |
+
+The numeric confidence is internal and now appears only inside the collapsed *Audit*
+section, labelled as a heuristic rather than a correctness rate.
+
+**Phase 1 shipped** the workspace shell in `frontend/`: left module nav (Chat, Knowledge,
+ARXML Explorer, Graph, Requirements, Tests, Diffs & Impact, Diagrams & Reports, Code
+Review, Evaluation), an evidence drawer that opens at the exact cited passage, inline
+`[E1] p.42` citation chips, the collapsible answer sections, and honest empty states that
+say what is missing and which phase delivers it. The API gained two additive routes —
+`GET /api/v2/modules` and `GET /api/v2/answerability/{conversation_id}/{message_index}`
+(the latter returns **501** until the gate exists in Phase 5, so the UI can never infer a
+status from a confidence float). CI now runs `pytest`, `tsc`, `next build` and asserts
+that the built stylesheet really contains the design-system classes.
 
 ## Architecture
 
