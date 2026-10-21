@@ -12,6 +12,14 @@ import type {
   ArxmlV2Artifact,
   ArxmlV2Tree,
   ArxmlValidationResult,
+  TraceCoverage,
+  TraceMatrix,
+  TraceOrphans,
+  TraceRequirement,
+  FindingRow,
+  FailureCluster,
+  TestResultRow,
+  TestRunRow,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -114,6 +122,32 @@ export const api = {
       `/api/v2/arxml/${encodeURIComponent(artifactId)}/path?path=${encodeURIComponent(path)}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`),
 
   /** Trace a communication path between two elements. */
+  /* ---------------- traceability and test intelligence (Phase 6) ---------------- */
+
+  requirementsList: (projectId = "") =>
+    json<TraceRequirement[]>(`/api/v2/requirements${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
+  traceabilityMatrix: (projectId = "") =>
+    json<TraceMatrix>(`/api/v2/traceability/matrix${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
+  traceabilityCoverage: (projectId = "") =>
+    json<TraceCoverage>(`/api/v2/traceability/coverage${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
+  traceabilityOrphans: (projectId = "") =>
+    json<TraceOrphans>(`/api/v2/traceability/orphans${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
+  testRuns: (projectId = "") =>
+    json<TestRunRow[]>(`/api/v2/tests/runs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
+  testResults: (runId = "") =>
+    json<TestResultRow[]>(`/api/v2/tests/results${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+
+  testClusters: (runId = "") =>
+    json<FailureCluster[]>(`/api/v2/tests/clusters${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
+
+  findingsList: (projectId = "") =>
+    json<FindingRow[]>(`/api/v2/findings${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
+
   arxmlV2Communication: (artifactId: string, source: string, target: string) =>
     json<{ status: string; paths?: { nodes: string[]; connector_types: string[] }[]; error?: string; summary?: string }>(
       `/api/v2/arxml/${encodeURIComponent(artifactId)}/communication?source=${encodeURIComponent(source)}&target=${encodeURIComponent(target)}`),

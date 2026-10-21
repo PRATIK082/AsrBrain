@@ -7,6 +7,7 @@ import { EvidenceDrawer } from "./EvidenceDrawer";
 import { EmptyModule } from "./EmptyModule";
 import { ModuleNav } from "./ModuleNav";
 import { ArxmlExplorer } from "./ArxmlExplorer";
+import { TraceabilityExplorer } from "./TraceabilityExplorer";
 
 /**
  * Modules that are backed by a working surface today. Everything else renders
@@ -21,6 +22,8 @@ const SURFACE_BY_MODULE: Record<string, string> = {
 /** Modules with a dedicated explorer instead of the assistant surface. */
 const EXPLORER_BY_MODULE: Record<string, string> = {
   arxml: "arxml",
+  requirements: "requirements",
+  tests: "tests",
 };
 
 /** Offline fallback so the workspace still renders without the API. */
@@ -90,19 +93,20 @@ const FALLBACK: ModuleCatalogue = {
       description:
         "Normalise requirements, link them to code and tests, and show coverage and orphans.",
       capability:
-        "Requirement identifiers are extracted from the specification corpus and are searchable.",
+        "Requirements ingest from CSV/JSON, links carry a review state, and the matrix, coverage and orphan views are bidirectional.",
       missing:
-        "Requirement ingestion, revision status, reviewed trace links and the traceability matrix (Phase 6).",
+        "A link-approval screen, requirement revision history and XLSX import (Phase 7).",
       phase: "Phase 6",
     },
     {
       id: "tests",
       title: "Test & Log Intelligence",
       href: "#/tests",
-      status: "planned",
+      status: "partial",
       description: "Ingest test results and logs, cluster failures and link them to changes.",
-      capability: "Nothing yet.",
-      missing: "Test adapters, failure clustering and the test timeline (Phase 6).",
+      capability:
+        "JUnit XML and CSV results ingest, failures cluster by message shape, and findings carry severity, owner and review state.",
+      missing: "CAN/log adapters, the test timeline and the link to recent changes (Phase 7).",
       phase: "Phase 6",
     },
     {
@@ -224,7 +228,9 @@ export function WorkspaceShell() {
       />
 
       <div className="relative flex min-w-0 flex-1">
-        {explorerModule ? (
+        {explorerModule === "requirements" || explorerModule === "tests" ? (
+          <TraceabilityExplorer view={explorerModule} />
+        ) : explorerModule ? (
           <ArxmlExplorer />
         ) : surfaceModule ? (
           <AssistantShell

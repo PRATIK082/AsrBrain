@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import json
+import uuid
 import os
 import sqlite3
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -790,18 +791,18 @@ _WORKSPACE_MODULES: list[dict] = [
         "href": "#/requirements",
         "status": "partial",
         "description": "Normalise requirements, link them to code and tests, and show coverage and orphans.",
-        "capability": "Requirement identifiers are extracted from the specification corpus and are searchable.",
-        "missing": "Requirement ingestion, revision status, reviewed trace links and the traceability matrix (Phase 6).",
+        "capability": "Requirements ingest from CSV/JSON, links carry a review state, and the matrix, coverage and orphan views are bidirectional.",
+        "missing": "A link-approval screen, requirement revision history and XLSX import (Phase 7).",
         "phase": "Phase 6",
     },
     {
         "id": "tests",
         "title": "Test & Log Intelligence",
         "href": "#/tests",
-        "status": "planned",
+        "status": "partial",
         "description": "Ingest test results and logs, cluster failures and link them to changes.",
-        "capability": "Nothing yet.",
-        "missing": "Test adapters, failure clustering and the test timeline (Phase 6).",
+        "capability": "JUnit XML and CSV results ingest, failures cluster by message shape, and findings carry severity, owner and review state.",
+        "missing": "CAN/log adapters, the test timeline and the link to recent changes (Phase 7).",
         "phase": "Phase 6",
     },
     {
@@ -1496,3 +1497,316 @@ async def api_v2_arxml_upload(file: UploadFile = File(...), tenant: str = "defau
         },
         "warnings": topology.artifact.validation_warnings,
     }
+
+
+# ---------------- v2: requirements, tests, traceability, findings (Phase 6) ----------------
+# Additive only: the 47 v1 routes and the Phase-2/3/4/5 v2 routes keep their
+# path, request shape and response keys (ADR-0008).
+
+
+class RequirementIngestRequest(BaseModel):
+    format: str = "csv"                 # csv | json
+    content: str
+    project_id: str = ""
+    artifact_version_id: str = ""
+
+
+class TraceLinkCreate(BaseModel):
+    project_id: str = ""
+    source_type: str
+    source_id: str
+    target_type: str
+    target_id: str
+    link_type: str = "traces"
+    review_state: str = "proposed"
+    confidence: float = 1.0
+    is_inferred: bool = False
+    extraction_method: str = ""
+    artifact_version_id: str = ""
+    source_location_id: str = ""
+
+
+class TraceLinkReview(BaseModel):
+    review_state: str
+    reviewed_by: str = ""
+    review_note: str = ""
+
+
+class TestIngestRequest(BaseModel):
+    format: str = "junit"               # junit | csv
+    content: str
+    project_id: str = ""
+    run_id: str = ""
+    suite: str = ""
+    branch: str = ""
+    commit_sha: str = ""
+    ci_run_id: str = ""
+
+
+class FindingCreate(BaseModel):
+    project_id: str = ""
+    title: str
+    severity: str = "info"
+    status: str = "open"
+    summary: str = ""
+    source_type: str = ""
+    source_id: str = ""
+    test_run_id: str = ""
+    test_result_id: str = ""
+    affected_configuration: str = ""
+    suspected_root_cause: str = ""
+    owner: str = ""
+    review_state: str = "proposed"
+    evidence: list[dict] = []
+
+
+def _traceability():
+    from src.traceability import TraceabilityStore
+    return TraceabilityStore(settings.registry_db)
+
+
+@app.get("/api/v2/traceability/adapters")
+def api_v2_traceability_adapters():
+    """The requirement and test ingestion adapters that are available."""
+    from src.traceability import test_adapters
+    return {"adapters": test_adapters(), "count": len(test_adapters())}
+
+
+@app.post("/api/v2/requirements/ingest")
+def api_v2_requirements_ingest(req: RequirementIngestRequest):
+    """Normalise and store requirements from a CSV or JSON export.
+
+    Unknown columns are kept as properties — nothing in the source file is
+    thrown away silently.
+    """
+    from src.traceability import ingest_requirements_csv, ingest_requirements_json
+    fmt = (req.format or "csv").lower()
+    try:
+        if fmt == "json":
+            requirements = ingest_requirements_json(req.content, req.project_id,
+                                                    req.artifact_version_id)
+        elif fmt == "csv":
+            requirements = ingest_requirements_csv(req.content, req.project_id,
+                                                   req.artifact_version_id)
+        else:
+            raise ValueError(f"unsupported format: {req.format} (use csv or json)")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    store = _traceability()
+    try:
+        stored = [store.upsert_requirement(r, req.project_id) for r in requirements]
+    finally:
+        store.close()
+    return {"ingested": len(stored), "requirements": stored}
+
+
+@app.get("/api/v2/requirements")
+def api_v2_requirements_list(project_id: str = "", limit: int = 1000):
+    store = _traceability()
+    try:
+        items = store.list_requirements(project_id=project_id, limit=limit)
+    finally:
+        store.close()
+    return {"requirements": items, "count": len(items)}
+
+
+@app.get("/api/v2/requirements/{requirement_id}")
+def api_v2_requirements_get(requirement_id: str):
+    store = _traceability()
+    try:
+        item = store.get_requirement(requirement_id)
+    finally:
+        store.close()
+    if item is None:
+        raise HTTPException(404, f"unknown requirement: {requirement_id}")
+    return item
+
+
+@app.post("/api/v2/traceability/links")
+def api_v2_traceability_link_create(req: TraceLinkCreate):
+    """Propose a trace link. A machine may propose; only a human approves."""
+    from src.traceability import LINK_REVIEW_STATES
+    if req.review_state not in LINK_REVIEW_STATES:
+        raise HTTPException(400, f"unknown review_state: {req.review_state}")
+    store = _traceability()
+    try:
+        link = store.add_trace_link(
+            project_id=req.project_id, source_type=req.source_type,
+            source_id=req.source_id, target_type=req.target_type,
+            target_id=req.target_id, link_type=req.link_type,
+            review_state=req.review_state, confidence=req.confidence,
+            is_inferred=req.is_inferred, extraction_method=req.extraction_method,
+            artifact_version_id=req.artifact_version_id,
+            source_location_id=req.source_location_id)
+    finally:
+        store.close()
+    return link
+
+
+@app.post("/api/v2/traceability/links/{link_id}/review")
+def api_v2_traceability_link_review(link_id: str, req: TraceLinkReview):
+    """Record the human decision on a proposed link."""
+    from src.traceability import LINK_REVIEW_STATES
+    if req.review_state not in LINK_REVIEW_STATES:
+        raise HTTPException(400, f"unknown review_state: {req.review_state}")
+    store = _traceability()
+    try:
+        link = store.set_link_review_state(link_id, req.review_state,
+                                           req.reviewed_by, req.review_note)
+    finally:
+        store.close()
+    if link is None:
+        raise HTTPException(404, f"unknown trace link: {link_id}")
+    return link
+
+
+def _matrix_inputs(project_id: str):
+    store = _traceability()
+    try:
+        requirements = store.list_requirements(project_id=project_id)
+        links = store.list_trace_links(project_id=project_id)
+        cases = store.list_test_cases(project_id=project_id)
+        results = store.list_test_results()
+    finally:
+        store.close()
+    return requirements, links, cases, results
+
+
+@app.get("/api/v2/traceability/matrix")
+def api_v2_traceability_matrix(project_id: str = ""):
+    """The traceability matrix in both directions.
+
+    The evidence column says "available for review" — never "compliant".
+    """
+    from src.traceability import traceability_matrix
+    requirements, links, cases, results = _matrix_inputs(project_id)
+    return traceability_matrix(requirements, links, cases, results)
+
+
+@app.get("/api/v2/traceability/coverage")
+def api_v2_traceability_coverage(project_id: str = ""):
+    from src.traceability import coverage_report
+    requirements, links, cases, results = _matrix_inputs(project_id)
+    return coverage_report(requirements, links, cases, results)
+
+
+@app.get("/api/v2/traceability/orphans")
+def api_v2_traceability_orphans(project_id: str = ""):
+    from src.traceability import orphan_report
+    requirements, links, cases, _results = _matrix_inputs(project_id)
+    return orphan_report(requirements, links, cases)
+
+
+@app.get("/api/v2/traceability/impact")
+def api_v2_traceability_impact(requirement_id: str, project_id: str = ""):
+    from src.traceability import impact_of_requirement
+    requirements, links, _cases, _results = _matrix_inputs(project_id)
+    children: dict[str, str] = {}
+    for item in requirements:
+        parent = item.get("parent_id") or ""
+        if parent:
+            # child -> parent, the direction impact_of_requirement expects
+            children[item.get("id", "")] = parent
+    return impact_of_requirement(requirement_id, requirements, links, children)
+
+
+@app.post("/api/v2/tests/ingest")
+def api_v2_tests_ingest(req: TestIngestRequest):
+    """Ingest a JUnit XML report or a generic test-results CSV."""
+    from src.traceability import ingest_junit_xml, ingest_test_results_csv
+    fmt = (req.format or "junit").lower()
+    run_id = req.run_id or f"run-{uuid.uuid4().hex[:10]}"
+    try:
+        if fmt == "junit":
+            cases, run, results = ingest_junit_xml(
+                req.content, run_id=run_id, suite=req.suite, ci_run_id=req.ci_run_id,
+                branch=req.branch, commit_sha=req.commit_sha)
+        elif fmt == "csv":
+            cases, run, results = ingest_test_results_csv(
+                req.content, run_id=run_id, suite=req.suite, branch=req.branch,
+                commit_sha=req.commit_sha)
+        else:
+            raise ValueError(f"unsupported format: {req.format} (use junit or csv)")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    store = _traceability()
+    try:
+        for case in cases:
+            store.upsert_test_case(case)
+        stored_run = store.add_test_run(run)
+        for result in results:
+            store.add_test_result(result)
+    finally:
+        store.close()
+    return {"run": stored_run, "test_cases": len(cases), "results": len(results)}
+
+
+@app.get("/api/v2/tests/runs")
+def api_v2_tests_runs(project_id: str = "", limit: int = 200):
+    store = _traceability()
+    try:
+        runs = store.list_test_runs(project_id=project_id, limit=limit)
+    finally:
+        store.close()
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/v2/tests/results")
+def api_v2_tests_results(run_id: str = "", limit: int = 5000):
+    store = _traceability()
+    try:
+        results = store.list_test_results(run_id=run_id, limit=limit)
+    finally:
+        store.close()
+    return {"results": results, "count": len(results)}
+
+
+@app.get("/api/v2/tests/clusters")
+def api_v2_tests_clusters(run_id: str = ""):
+    """Group failures by message shape — the same cause, many symptoms."""
+    from src.traceability import cluster_failures
+    store = _traceability()
+    try:
+        results = store.list_test_results(run_id=run_id)
+    finally:
+        store.close()
+    failures = [r for r in results if r.get("status") in ("failed", "error")]
+    clusters = cluster_failures(failures)
+    return {"clusters": clusters, "count": len(clusters), "failures": len(failures)}
+
+
+@app.get("/api/v2/findings")
+def api_v2_findings_list(project_id: str = "", severity: str = "", limit: int = 1000):
+    store = _traceability()
+    try:
+        items = store.list_findings(project_id=project_id, severity=severity, limit=limit)
+    finally:
+        store.close()
+    return {"findings": items, "count": len(items)}
+
+
+@app.post("/api/v2/findings")
+def api_v2_findings_create(req: FindingCreate):
+    from src.traceability import Finding
+    store = _traceability()
+    try:
+        finding = store.add_finding(Finding(
+            id=f"fnd-{uuid.uuid4().hex[:12]}",
+            project_id=req.project_id,
+            title=req.title,
+            severity=req.severity,
+            status=req.status,
+            summary=req.summary,
+            source_type=req.source_type,
+            source_id=req.source_id,
+            test_run_id=req.test_run_id,
+            test_result_id=req.test_result_id,
+            affected_configuration=req.affected_configuration,
+            suspected_root_cause=req.suspected_root_cause,
+            owner=req.owner,
+            review_state=req.review_state,
+            evidence=list(req.evidence),
+        ))
+    finally:
+        store.close()
+    return finding

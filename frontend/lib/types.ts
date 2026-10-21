@@ -371,3 +371,109 @@ export interface ArxmlValidationResult {
   scope: Record<string, number>;
   summary?: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * Traceability and test intelligence (Phase 6)
+ * ------------------------------------------------------------------ */
+
+export interface TraceRequirement {
+  id: string;
+  title: string;
+  revision: string;
+  status: string;
+  source: string;
+  parent_id: string;
+  verification_method: string;
+  module: string;
+  autosar_release: string;
+  description: string;
+  project_id: string;
+  artifact_version_id: string;
+  review_state: string;
+  properties: Record<string, unknown>;
+}
+
+export interface TraceMatrixRow {
+  requirement_id: string;
+  title: string;
+  status: string;
+  review_state: string;
+  test_cases: { id: string; name: string; suite: string; latest_status?: string }[];
+  accepted_links: number;
+  proposed_links: number;
+  evidence: string;
+}
+
+export interface TraceMatrix {
+  rows: TraceMatrixRow[];
+  reverse: { test_case_id: string; requirements: string[]; accepted_links: number }[];
+  counts: Record<string, number>;
+}
+
+export interface TraceCoverage {
+  requirements: number;
+  with_accepted_link: number;
+  with_proposed_link_only: number;
+  without_any_link: number;
+  failing: number;
+  failing_requirements: string[];
+  statement: string;
+  counts: Record<string, number>;
+}
+
+export interface TraceOrphans {
+  orphan_requirements: { id: string; title: string }[];
+  orphan_test_cases: { id: string; name: string; suite: string }[];
+  counts: Record<string, number>;
+  statement: string;
+}
+
+export interface TestRunRow {
+  id: string;
+  suite: string;
+  tool: string;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  ci_run_id: string;
+  branch: string;
+  commit_sha: string;
+  summary?: { total: number; passed: number; failed: number; skipped: number; error: number };
+}
+
+export interface TestResultRow {
+  id: string;
+  run_id: string;
+  test_case_id: string;
+  name: string;
+  classname: string;
+  status: string;
+  duration_ms: number;
+  message: string;
+}
+
+export interface FailureCluster {
+  key: string;
+  count: number;
+  statuses: string[];
+  examples: { result_id: string; name: string; message: string }[];
+  test_cases: string[];
+  first_message: string;
+}
+
+export interface FindingRow {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  summary: string;
+  source_type: string;
+  source_id: string;
+  test_run_id: string;
+  test_result_id: string;
+  affected_configuration: string;
+  suspected_root_cause: string;
+  owner: string;
+  review_state: string;
+  evidence: unknown[];
+}

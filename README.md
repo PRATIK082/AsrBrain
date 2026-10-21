@@ -404,6 +404,45 @@ it (the SSE `complete` event carries it too, so the UI never guesses).
 
 Details: `docs/architecture/phase-5-implementation-plan.md`.
 
+## Requirements and test intelligence (Phase 6)
+
+The two engineering surfaces that were still missing: requirements that are
+normalised on the way in, test results that are clustered on the way in, and a
+traceability matrix that joins them in both directions.
+
+```
+requirements.csv / .json --> normalise --> requirements
+                                        --> trace_links (review_state)
+junit.xml / results.csv  --> test_cases · test_runs · test_results
+                                        --> failure clusters
+                                        --> findings
+```
+
+* **A machine may propose a link, only a human may approve it.** Every trace
+  link carries a review state: `proposed`, `machine-extracted`, `reviewed`,
+  `approved`, `rejected`. A `proposed` link is visible but is never counted as
+  evidence.
+* **The wording is deliberate.** A requirement with a test case has *evidence
+  available for review*. It is not "compliant" and nothing in this code asserts
+  ISO 26262 — a qualified human approves the links.
+* **Failure clustering** groups failures by the *shape* of the message (hex
+  blobs and digit runs normalised), so one bug in forty tests is one cluster.
+* **Orphans are reported, not judged.** A requirement with no link and a test
+  case with no requirement are listed for review; neither is automatically a
+  failure or a defect.
+
+| Route | Purpose |
+|---|---|
+| `POST /api/v2/requirements/ingest` | normalise CSV/JSON requirements |
+| `GET /api/v2/requirements` · `GET /api/v2/requirements/{id}` | the requirement list |
+| `POST /api/v2/traceability/links` · `POST /api/v2/traceability/links/{id}/review` | propose a link, review a link |
+| `GET /api/v2/traceability/matrix` · `coverage` · `orphans` · `impact` | the matrix and its views |
+| `POST /api/v2/tests/ingest` · `GET /api/v2/tests/{runs,results,clusters}` | test results and failure clusters |
+| `GET/POST /api/v2/findings` | findings with severity, owner and review state |
+
+The Requirements and Tests screens in the React workspace render exactly this
+data. See `docs/architecture/phase-6-implementation-plan.md`.
+
 ## Architecture
 
 ```
