@@ -91,21 +91,20 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ channels
     def _channel_scores(self, queries: list[str]) -> tuple[dict[str, float], dict[str, float]]:
-        """Mean dense and BM25 score per chunk id over the query variants."""
+        """Best dense and BM25 score per chunk id over the query variants."""
         ids = self.index.chunk_ids
         n = len(ids)
         dense = np.zeros(n)
         bm25 = np.zeros(n)
-        used = 0
+        # CombMAX across query variants: a chunk scoring high on ANY variant keeps
+        # its high score. A mean would let the original phrasing drown out the
+        # expansion variant (and vice versa) — each variant is a different way of
+        # saying the same need, so the best match wins, they don't vote.
         for q in queries:
             if self.flags.use_dense:
-                dense += self.index.dense_scores(q)
+                dense = np.maximum(dense, self.index.dense_scores(q))
             if self.flags.use_bm25:
-                bm25 += self.index.bm25_scores(q)
-            used += 1
-        used = max(1, used)
-        dense /= used
-        bm25 /= used
+                bm25 = np.maximum(bm25, self.index.bm25_scores(q))
         pool = settings.fusion_pool
         dense_rank = np.argsort(-dense)[:pool]
         bm25_rank = np.argsort(-bm25)[:pool]
@@ -186,10 +185,19 @@ class RetrievalPipeline:
 
         queries = [query]
         if self.flags.use_rewrite:
-            rewrite(plan)  # populates plan.normalized_query / corrections
+            rw = rewrite(plan)  # alias/registry expansions, not free text
             norm_q = plan.normalized_query
             if norm_q and norm_q != query:
                 queries.append(norm_q)
+            # The module/API/requirement expansions were built but never scored.
+            # Append them as ONE extra variant (terms not already in the query) so
+            # domain phrasing ("sw component") also matches document vocabulary
+            # ("software component", "runnable") without drowning the original.
+            extra = [t for t in rw.get("lexical_queries", [])
+                     if t and t.lower() not in query.lower()
+                     and query.lower() not in t.lower()]
+            if extra:
+                queries.append(" ".join(dict.fromkeys(extra)))
 
         per_rel: dict[str, int] = {}
         filter_traces: list[dict] = []
@@ -218,4 +226,5 @@ class RetrievalPipeline:
                 "evidence": evidence, "per_release": per_rel,
                 "retrieval_score": round(retrieval_score, 4),
                 "filter_trace": filter_traces,
-                "flags": self.flags.as_dict()}
+                "flags": self.flags.as_dict(),
+                "query_variants": queries}

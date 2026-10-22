@@ -19,7 +19,8 @@ MODULE_ALIASES = {
     # RTE / software-component world
     "rte": "RTE", "run-time environment": "RTE", "runtime environment": "RTE",
     "runnable": "RTE", "runnables": "RTE",
-    "swc": "RTE", "software component": "RTE", "software components": "RTE",
+    "swc": "RTE", "sw component": "RTE", "sw components": "RTE",
+    "software component": "RTE", "software components": "RTE",
     "vfb": "RTE", "virtual functional bus": "RTE",
     # Diagnostics: DTC / event memory lives in Dem, protocol/services in Dcm
     "dtc": "Dem", "diagnostic trouble code": "Dem", "diagnostic event": "Dem",

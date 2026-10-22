@@ -19,7 +19,7 @@ from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.router import answer_query
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
-from src.chat.store import ChatStore
+from src.chat.store import ChatStore, classify_outcome
 from src.ingestion.pipeline import run as run_ingest
 from src.evaluation.datasets import write_seed
 
@@ -216,17 +216,29 @@ def api_chat(req: ChatRequest):
     _store.add_message(cid, "user", req.message)
     spec = _provider_spec(req)
     cancel: dict = {}
+    import time as _time
+    _t0 = _time.time()
     events = list(run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior))
     final = next((e for e in reversed(events) if e.get("event") == "complete"), None)
     clarify = next((e for e in events if e.get("event") == "clarify"), None)
     if clarify is not None:
         _store.add_message(cid, "assistant", clarify["question"], {"clarify": clarify.get("missing", [])})
+        _store.log_query(cid, req.message, [], classify_outcome("", clarify=True),
+                         intent=(clarify.get("plan") or {}).get("intent", "") if isinstance(clarify.get("plan"), dict) else "",
+                         pipeline_version=PIPELINE_VERSION, latency_s=_time.time() - _t0)
         return {"conversation_id": cid, "needs_clarification": True, **clarify}
     answer = (final or {}).get("answer", "")
     _store.add_message(cid, "assistant", answer,
                        {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", ""),
                         "plan": (final or {}).get("plan", {}),
                         "followups": (final or {}).get("followups", [])})
+    _ev_ids = [e.get("source_id", "") for e in events
+               if e.get("event") == "evidence" and e.get("source_id")]
+    _store.log_query(cid, req.message, _ev_ids,
+                     classify_outcome(answer, citation_coverage=(final or {}).get("citation_coverage")),
+                     intent=((final or {}).get("plan") or {}).get("intent", ""),
+                     pipeline_version=PIPELINE_VERSION, latency_s=_time.time() - _t0,
+                     llm=(final or {}).get("llm", ""), confidence=(final or {}).get("confidence"))
     return {"conversation_id": cid, "needs_clarification": False, **(final or {})}
 
 

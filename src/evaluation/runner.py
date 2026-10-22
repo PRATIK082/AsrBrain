@@ -272,17 +272,25 @@ def run_evaluation(golden_path: str, canonical: str, index_path: str, out_dir: s
                    split_path: str | None = None, split: str = "all", mode: str = "retrieval",
                    limit: int = 0, use_llm: bool = True, llm_sample: int = 40,
                    price_in: float = 0.0, price_out: float = 0.0,
-                   label: str = "", flag_overrides: dict | None = None) -> dict:
+                   label: str = "", flag_overrides: dict | None = None,
+                   allow_drift: bool = False) -> dict:
     """Run the harness and write the report. Returns the full payload.
 
     ``flag_overrides`` maps RetrievalFlags fields to values (ablation arms); None means
     the process defaults.
+
+    Split drift fails closed: when the golden set no longer matches the frozen
+    manifest, the run refuses to score unless ``allow_drift`` is set (re-freeze
+    deliberately with ``src.evaluation.splits.save_split``, e.g. via promote).
     """
     items = load_golden(golden_path)
     drift: list[str] = []
     if split_path and os.path.exists(split_path):
         manifest = load_split(split_path)
         drift = verify_split(items, manifest, golden_path)
+        if drift and not allow_drift:
+            raise RuntimeError(
+                "split drift detected and --allow-drift not set: " + " | ".join(drift))
         if split in ("train", "holdout", "dev"):
             train, holdout = apply_split(items, manifest)
             items = train if split == "train" else holdout
@@ -342,6 +350,7 @@ def run_evaluation(golden_path: str, canonical: str, index_path: str, out_dir: s
         "golden_path": golden_path,
         "golden_sha256": None,
         "split_drift": drift,
+        "drift_acknowledged": bool(drift) and allow_drift,
         "coverage": coverage_report(items),
         "metrics_methods": M.METHODS,
         "aggregate": aggregate,

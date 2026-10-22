@@ -15,10 +15,10 @@ def _fresh_db(tmp_path):
     return db, conn
 
 
-def test_migrate_fresh_db_reaches_v2(tmp_path):
+def test_migrate_fresh_db_reaches_current(tmp_path):
     _, conn = _fresh_db(tmp_path)
-    assert mig.migrate(conn) == 2
-    assert mig.get_schema_version(conn) == 2
+    assert mig.migrate(conn) == mig.CURRENT_VERSION
+    assert mig.get_schema_version(conn) == mig.CURRENT_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(chunks)").fetchall()}
     for c in ("snapshot_id", "content_hash", "created_by", "confidence",
               "char_start", "printed_page", "line_start"):
@@ -28,8 +28,8 @@ def test_migrate_fresh_db_reaches_v2(tmp_path):
 
 def test_migrate_is_idempotent(tmp_path):
     _, conn = _fresh_db(tmp_path)
-    assert mig.migrate(conn) == 2
-    assert mig.migrate(conn) == 2  # second run is a no-op
+    assert mig.migrate(conn) == mig.CURRENT_VERSION
+    assert mig.migrate(conn) == mig.CURRENT_VERSION  # second run is a no-op
     conn.close()
 
 
@@ -133,3 +133,17 @@ def test_pipeline_version_prefers_rag_spelling(monkeypatch):
     importlib.reload(s)
     assert s.Settings().pipeline_version == "v2"
     assert os.environ.get("RAG_PIPELINE_VERSION", "v2") == "v2"
+
+
+def test_migrate_v3_creates_graph_store(tmp_path):
+    from src.ingestion import migrations as mig
+    conn = sqlite3.connect(str(tmp_path / "g.db"))
+    assert mig.migrate(conn) == 3
+    assert mig.migrate(conn) == 3  # idempotent
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"graph_nodes", "graph_edges", "trace_links"} <= names
+    for tbl, col in (("graph_nodes", "snapshot_id"), ("graph_edges", "is_inferred"),
+                     ("trace_links", "evidence")):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+        assert col in cols
+    conn.close()

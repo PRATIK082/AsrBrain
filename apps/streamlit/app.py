@@ -64,7 +64,7 @@ from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
-from src.chat.store import ChatStore
+from src.chat.store import ChatStore, classify_outcome
 from src.ingestion.pipeline import run as run_ingest
 
 st.set_page_config(page_title="AsrBrain — Automotive Intelligence", page_icon="🚗", layout="wide")
@@ -413,7 +413,19 @@ with tab_chat:
                     st.toast("Feedback recorded")
                 if c2.button("👎", key=f"neg_{i}"):
                     store.add_feedback(st.session_state.cid, i, "down")
-                    st.toast("Feedback recorded — add the gold answer to data/benchmarks/")
+                    _msgs = conv.get("messages", [])
+                    _q = next((m.get("content", "") for m in reversed(_msgs[:i])
+                               if m.get("role") == "user"), "")
+                    try:
+                        import datetime as _dt
+                        _cand = {"query": _q, "conversation_id": st.session_state.cid,
+                                 "message_idx": i, "rating": "down",
+                                 "created_at": _dt.datetime.now().isoformat(timespec="seconds")}
+                        with open("data/benchmarks/mining_candidates.jsonl", "a", encoding="utf-8") as _fh:
+                            _fh.write(json.dumps(_cand, ensure_ascii=False) + "\n")
+                        st.toast("Feedback recorded — saved as a mining candidate")
+                    except Exception:
+                        st.toast("Feedback recorded — add the gold answer to data/benchmarks/")
             else:
                 if st.button("✏️ Edit & resend", key=f"edit_{i}"):
                     st.session_state.editing[i] = m["content"]
@@ -505,6 +517,8 @@ with tab_chat:
                 st.markdown(clarify_ev["question"])
                 store.add_message(st.session_state.cid, "assistant", clarify_ev["question"],
                                   {"clarify": clarify_ev.get("missing", [])})
+                store.log_query(st.session_state.cid, pending, [], classify_outcome("", clarify=True),
+                                latency_s=_time.time() - t0)
                 st.rerun()
             full = (final_ev or {}).get("answer", acc)
             if not (full or "").strip():
@@ -539,12 +553,19 @@ with tab_chat:
             _c3.commit()
             _c3.close()
             store.add_message(st.session_state.cid, "assistant", full,
-                              {"trace": (final_ev or {}).get("trace", {}),
-                               "llm": (final_ev or {}).get("llm", ""),
-                               "plan": plan,
-                               "graph": (final_ev or {}).get("graph", []),
-                               "evidence": ev_cards,
-                               "followups": (final_ev or {}).get("followups", [])})
+                               {"trace": (final_ev or {}).get("trace", {}),
+                                "llm": (final_ev or {}).get("llm", ""),
+                                "plan": plan,
+                                "graph": (final_ev or {}).get("graph", []),
+                                "evidence": ev_cards,
+                                "followups": (final_ev or {}).get("followups", [])})
+            store.log_query(st.session_state.cid, pending,
+                            [e.get("source_id", "") for e in ev_cards if e.get("source_id")],
+                            classify_outcome(full, citation_coverage=(final_ev or {}).get("citation_coverage")),
+                            intent=plan.get("intent", ""),
+                            latency_s=_time.time() - t0,
+                            llm=(final_ev or {}).get("llm", ""),
+                            confidence=(final_ev or {}).get("confidence"))
             st.session_state.last = final_ev or {}
             st.session_state.last_evidence = ev_cards
             st.session_state.last_followups = (final_ev or {}).get("followups", [])
@@ -606,7 +627,17 @@ with tab_trace:
         st.caption("Safe operational summary (query plan, filters, counts, coverage, confidence) appears here.")
 with tab_graph:
     last = st.session_state.get("last", {})
-    edges = (last.get("graph", []) or [])
+    # Persistent store first (Phase 4): edges for the last answer's evidence with
+    # snapshot provenance. Falls back to the run's ephemeral edges on old stores.
+    edges = []
+    try:
+        from src.graph.query import evidence_graph as _graph_edges
+        edges = _graph_edges(settings.canonical_db,
+                             st.session_state.get("last_evidence", [])) or []
+    except Exception:
+        edges = []
+    if not edges:
+        edges = (last.get("graph", []) or [])
     if edges:
         for e in edges[:30]:
             flag = " (inferred)" if e.get("is_inferred") else ""

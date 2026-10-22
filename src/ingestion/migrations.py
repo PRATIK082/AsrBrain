@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -66,6 +66,34 @@ MIGRATION_V2 = [
     "ALTER TABLE figures ADD COLUMN content_hash TEXT",
     "ALTER TABLE figures ADD COLUMN created_by TEXT",
     "ALTER TABLE figures ADD COLUMN confidence REAL",
+]
+
+
+MIGRATION_V3 = [
+    # Knowledge-graph store (Phase 4, G1). Same contract as the reference
+    # data/graph/graph.db census (nodes/edges/trace_links), plus the v2 provenance
+    # tuple on every row. Deterministic ids (see src/graph/build.py) make rebuilds
+    # idempotent: same content -> same id -> INSERT OR REPLACE refreshes in place.
+    """CREATE TABLE IF NOT EXISTS graph_nodes(
+        node_id TEXT PRIMARY KEY, type TEXT, label TEXT, properties TEXT,
+        degree INT DEFAULT 0, community TEXT, source TEXT,
+        snapshot_id TEXT, content_hash TEXT, created_by TEXT, confidence REAL)""",
+    """CREATE TABLE IF NOT EXISTS graph_edges(
+        edge_id TEXT PRIMARY KEY, src TEXT, dst TEXT, rel TEXT, weight REAL,
+        confidence REAL, is_inferred INT DEFAULT 0, inference_method TEXT,
+        provenance TEXT,
+        snapshot_id TEXT, content_hash TEXT, created_by TEXT)""",
+    """CREATE TABLE IF NOT EXISTS trace_links(
+        link_id TEXT PRIMARY KEY, source_type TEXT, source_id TEXT,
+        target_type TEXT, target_id TEXT, link_type TEXT, confidence REAL,
+        evidence TEXT, is_inferred INT DEFAULT 0,
+        snapshot_id TEXT, created_by TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_graph_edges_src ON graph_edges(src)",
+    "CREATE INDEX IF NOT EXISTS idx_graph_edges_dst ON graph_edges(dst)",
+    "CREATE INDEX IF NOT EXISTS idx_graph_edges_rel ON graph_edges(rel)",
+    "CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type)",
+    "CREATE INDEX IF NOT EXISTS idx_trace_links_source ON trace_links(source_id)",
+    "CREATE INDEX IF NOT EXISTS idx_trace_links_target ON trace_links(target_id)",
 ]
 
 
@@ -125,6 +153,12 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 2, "provenance + ingest_runs (additive, nullable)")
         version = 2
+    if version < 3 <= target:
+        for stmt in MIGRATION_V3:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 3, "knowledge-graph store (additive tables + indexes)")
+        version = 3
     conn.commit()
     return version
 

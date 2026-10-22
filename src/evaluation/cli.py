@@ -34,7 +34,7 @@ def cmd_run(args) -> int:
         golden_path=args.golden, canonical=args.canonical, index_path=args.index,
         out_dir=args.out, split_path=args.split, split=args.split_name, mode=args.mode,
         limit=args.limit, use_llm=not args.no_llm, llm_sample=args.llm_sample,
-        label=args.label)
+        label=args.label, allow_drift=args.allow_drift)
     agg = payload["aggregate"]
     print(json.dumps({
         "label": payload["label"], "mode": payload["mode"], "n": agg["n"],
@@ -109,6 +109,8 @@ def main(argv=None) -> int:
     r.add_argument("--llm-sample", type=int, default=40)
     r.add_argument("--no-llm", action="store_true")
     r.add_argument("--label", default="")
+    r.add_argument("--allow-drift", action="store_true",
+                   help="score despite split drift (records drift_acknowledged; re-freeze deliberately)")
     r.set_defaults(func=cmd_run)
 
     g = sub.add_parser("gate", help="compare a run against the thresholds")
