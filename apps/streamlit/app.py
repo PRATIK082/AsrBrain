@@ -236,11 +236,13 @@ with st.sidebar:
     st.session_state.depth = {"Eco (4)": TOKEN_CAPS.get("eco", 4),
                               "Balanced (8)": TOKEN_CAPS.get("balanced", 8),
                               "Deep (12)": TOKEN_CAPS.get("deep", 12)}[depth]
-    length = st.radio("Response length", ["Concise", "Standard", "Detailed"], index=0,
+    length = st.radio("Response length", ["Concise", "Standard", "Detailed"], index=1,
                       help=f"Token caps from config/generation.yaml: "
                            f"{TOKEN_CAPS.get('concise', 400)}/"
                            f"{TOKEN_CAPS.get('standard', 600)}/"
-                           f"{TOKEN_CAPS.get('detailed', 1200)}. Edit the file or the Token Config tab to change.")
+                           f"{TOKEN_CAPS.get('detailed', 1200)}. Configuration questions need room — "
+                           f"Concise may cut long procedures short (the answer says so when it happens). "
+                           f"Edit the file or the Token Config tab to change.")
     st.session_state.num_predict = {"Concise": TOKEN_CAPS.get("concise", 400),
                                     "Standard": TOKEN_CAPS.get("standard", 600),
                                     "Detailed": TOKEN_CAPS.get("detailed", 1200)}[length]

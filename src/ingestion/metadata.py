@@ -98,7 +98,13 @@ def detect_release_platform(text: str, filename: str) -> tuple[str, str, str]:
     if mr:
         release = f"R{mr.group(1)}-11"
         if platform == "unknown":
-            platform = "Adaptive" if "adaptive" in blob.lower() else "Foundation"
+            # An Rxx-11 number alone does not mean Foundation: Classic-Platform
+            # templates (e.g. "System Template AUTOSAR CP R22-11") carry one too.
+            # The CP header outranks the keyword guess.
+            if re.search(r"AUTOSAR\s+CP\b", blob) or "classic platform" in blob.lower():
+                platform = "Classic"
+            else:
+                platform = "Adaptive" if "adaptive" in blob.lower() else "Foundation"
     mc = re.search(r"\b4\.[2-4]\.\d\b", blob)
     if mc and not release:
         release = mc.group(0)
@@ -111,15 +117,37 @@ def canonical_module(name: str) -> str:
 
 
 def infer_module(text: str) -> str:
-    """Frequency-based module inference from alias mentions (deterministic)."""
+    """Frequency-based module inference from alias mentions (deterministic).
+
+    The document's own ``BSW Module BSW Context <Mod>`` markers are checked first:
+    when they name exactly one known module, that is the answer; when they name only
+    modules outside the known set (a template spanning many modules), no guess is made
+    at all — three stray alias hits must not outvote the document telling us it covers
+    modules we do not model. An empty module keeps the chunks unfiltered, which is
+    always safer than a wrong filter.
+    """
     import re as _re
-    sample = text[:20000].lower()
+    sample = text[:20000]
+    # The markers name the modules the document specifies ("BSW Context EthIf ...").
+    # They live in mapping tables throughout the document, so the scan covers the whole
+    # text (one pass). A template naming many modules is not guessable: abstain instead
+    # of letting stray alias hits elect a module the document is not about.
+    bsw = {m.group(1) for m in _re.finditer(r"BSW Context\s+(\w+)", text)}
+    if bsw:
+        canon_values = set(MODULE_ALIASES.values())
+        known = {MODULE_ALIASES.get(b.lower(), "") for b in bsw} - {""}
+        known &= canon_values
+        if len(known) == 1:
+            return next(iter(known))
+        if not known or len(bsw) > 3:
+            return ""
+    sample_lower = sample.lower()
     scores: dict[str, int] = {}
     for alias, canon in MODULE_ALIASES.items():
-        n = len(_re.findall(r"(?<![a-z0-9])" + _re.escape(alias) + r"(?![a-z0-9])", sample))
+        n = len(_re.findall(r"(?<![a-z0-9])" + _re.escape(alias) + r"(?![a-z0-9])", sample_lower))
         if n:
             scores[canon] = scores.get(canon, 0) + n
     if not scores:
         return ""
     best = max(scores, key=lambda k: scores[k])
-    return best if scores[best] >= 3 else ""
+    return best if scores[best] >= 5 else ""

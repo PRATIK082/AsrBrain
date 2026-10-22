@@ -48,3 +48,4 @@ frontend/tsconfig.tsbuildinfo
 # local launcher (Windows convenience, not part of the product)
 dev-api.bat
 dev-chat.bat
+dev-asrbrain.bat

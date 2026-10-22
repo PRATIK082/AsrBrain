@@ -68,6 +68,10 @@ class RetrievalFlags:
 
     # --- expansion ------------------------------------------------------------
     parent_expand: bool = True
+    #: present configuration evidence first, M2 model-structure last. The model chunks
+    #: (class definitions: what an element IS) are required context but must not lead;
+    #: the answer flows system template -> configuration and grounds out in the model.
+    order_model_last: bool = True
 
     # --- exact identifier path ------------------------------------------------
     exact_id_fast_path: bool = True
@@ -93,6 +97,7 @@ class RetrievalFlags:
             module_filter=_env_bool("module_filter", defaults.module_filter),
             pool_relax_ratio=_env_float("pool_relax_ratio", defaults.pool_relax_ratio),
             parent_expand=_env_bool("parent_expand", defaults.parent_expand),
+            order_model_last=_env_bool("order_model_last", defaults.order_model_last),
             exact_id_fast_path=_env_bool("exact_id_fast_path", defaults.exact_id_fast_path),
             exact_id_weight=_env_float("exact_id_weight", defaults.exact_id_weight),
             use_rewrite=_env_bool("use_rewrite", defaults.use_rewrite),

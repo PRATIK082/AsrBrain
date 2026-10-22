@@ -79,33 +79,49 @@ class HybridIndex:
         qv = self.embed_query(q)
         return (self.doc_matrix @ qv).astype(float)
 
-    def bm25_scores(self, q: str, k1: float = 1.5, b: float = 0.75) -> np.ndarray:
+    def _ensure_bm25(self):
+        """Build the inverted index once: term -> (doc ids, term freqs), plus doc lengths.
+
+        The per-term accumulation visits documents in id order, exactly like the old
+        full scan, so scores are bit-identical while each query term only touches the
+        documents that contain it.
+        """
+        from collections import Counter as C
         tokenized = self.tokenized or [tokenize_technical(t) for t in self.texts]
         if not self.tokenized:
             self.tokenized = tokenized
-        from collections import Counter as C
-        cached = getattr(self, "_bm25_cache", None)
-        if cached is None or cached[2] != len(tokenized):
-            df = C()
-            for toks in tokenized:
-                for t in set(toks):
-                    df[t] += 1
-            avgdl = sum(len(t) for t in tokenized) / max(1, len(tokenized))
-            self._bm25_cache = (df, avgdl, len(tokenized))
-        else:
-            df, avgdl, _ = cached
+        cached = getattr(self, "_bm25_postings", None)
+        if cached is not None and cached[0] == len(tokenized):
+            return cached[1]
+        postings: dict[str, list] = {}
+        doc_lens = np.zeros(len(tokenized))
+        for i, toks in enumerate(tokenized):
+            doc_lens[i] = len(toks)
+            for t, f in C(toks).items():
+                postings.setdefault(t, []).append((i, f))
+        index = {t: (np.array([i for i, _ in lst], dtype=np.int64),
+                     np.array([f for _, f in lst], dtype=np.float32))
+                 for t, lst in postings.items()}
+        avgdl = float(doc_lens.sum() / max(1, len(tokenized)))
+        built = (index, doc_lens, avgdl, len(tokenized))
+        self._bm25_postings = (len(tokenized), built)
+        return built
+
+    def bm25_scores(self, q: str, k1: float = 1.5, b: float = 0.75) -> np.ndarray:
+        index, doc_lens, avgdl, n = self._ensure_bm25()
         q_terms = tokenize_technical(q)
-        n = len(tokenized)
         scores = np.zeros(n)
         # `sorted` keeps the accumulation order stable, so the result does not depend on
         # set iteration order (which varies per process because string hashing is salted).
         for term in sorted(set(q_terms)):
-            idf = np.log((n - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5) + 1.0)
-            for i, toks in enumerate(tokenized):
-                f = toks.count(term)
-                if f:
-                    denom = f + k1 * (1 - b + b * len(toks) / (avgdl or 1))
-                    scores[i] += idf * (f * (k1 + 1) / denom)
+            hit = index.get(term)
+            if hit is None:
+                continue
+            ids, freqs = hit
+            df = len(ids)
+            idf = np.log((n - df + 0.5) / (df + 0.5) + 1.0)
+            denom = freqs + k1 * (1 - b + b * doc_lens[ids] / (avgdl or 1))
+            scores[ids] += idf * (freqs * (k1 + 1) / denom)
         return scores
 
     def save(self, path: str, fingerprint: dict | None = None):

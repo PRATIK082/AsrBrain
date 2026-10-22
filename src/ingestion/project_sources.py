@@ -40,6 +40,9 @@ REGISTRY_PATH = os.path.join("data", "canonical", "sources.json")
 CHECKOUT_ROOT = os.path.join("data", "sources")
 CHUNK_CHARS = 1200
 CHUNK_OVERLAP = 150
+#: per-file block ceiling. Sized for large generated sources (a 200 kB file at the
+#: 1050-char step yields ~190 blocks).
+MAX_BLOCKS_PER_FILE = 200
 
 
 @dataclass
@@ -221,7 +224,9 @@ def chunk_file(fp: str, kind: str, src: dict, rel: str) -> list[dict]:
     step = CHUNK_CHARS - CHUNK_OVERLAP
     for i in range(0, len(text), step):
         blocks.append(text[i:i + CHUNK_CHARS])
-        if len(blocks) > 60:
+        # Scale headroom for real codebases: a 200 kB source file yields ~190 blocks.
+        # The old cap (60) silently dropped the tail two-thirds of big files.
+        if len(blocks) > MAX_BLOCKS_PER_FILE:
             break
     chunks = []
     # M4: identity is content-derived (path + bytes), not path-derived. Two different

@@ -124,7 +124,9 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
     if conf["should_abstain"]:
         final = abstain_message(display_query, plan, evidence)
     else:
-        final = tokens_text + "\n\n## Sources\n" + citation_block(evidence)
+        from ..generation.answer import CUT_NOTICE, was_cut_off
+        notice = ("\n\n" + CUT_NOTICE) if was_cut_off(tokens_text) else ""
+        final = tokens_text + notice + "\n\n## Sources\n" + citation_block(evidence)
     try:
         edges = [e.model_dump() for e in extract_edges(evidence)]
     except Exception:

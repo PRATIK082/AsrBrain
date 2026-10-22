@@ -23,7 +23,7 @@ import numpy as np
 from ..config.settings import settings
 from ..indexing.hybrid import HybridIndex
 from ..schema.queries import QueryPlan
-from .context import compress, parent_expand
+from .context import compress, order_evidence, parent_expand
 from .flags import RetrievalFlags, default_flags
 from .fusion import normalise_scores, rrf, weighted_fusion
 from .metadata_filter import apply_filters_ex
@@ -155,6 +155,8 @@ class RetrievalPipeline:
                   if self.flags.use_rerank else cands)
         expanded = parent_expand(ranked, self.by_id) if self.flags.parent_expand else ranked
         final = expanded[:top_k_final]
+        if self.flags.order_model_last:
+            final = order_evidence(final)
         for c in final:
             c["compressed"] = compress(c.get("normalized_text", ""), queries[0])
         filter_trace["exact_candidates"] = len(exact_ids)

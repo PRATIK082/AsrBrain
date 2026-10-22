@@ -272,8 +272,12 @@ def run_evaluation(golden_path: str, canonical: str, index_path: str, out_dir: s
                    split_path: str | None = None, split: str = "all", mode: str = "retrieval",
                    limit: int = 0, use_llm: bool = True, llm_sample: int = 40,
                    price_in: float = 0.0, price_out: float = 0.0,
-                   label: str = "") -> dict:
-    """Run the harness and write the report. Returns the full payload."""
+                   label: str = "", flag_overrides: dict | None = None) -> dict:
+    """Run the harness and write the report. Returns the full payload.
+
+    ``flag_overrides`` maps RetrievalFlags fields to values (ablation arms); None means
+    the process defaults.
+    """
     items = load_golden(golden_path)
     drift: list[str] = []
     if split_path and os.path.exists(split_path):
@@ -293,6 +297,9 @@ def run_evaluation(golden_path: str, canonical: str, index_path: str, out_dir: s
         idx.build(chunks)
         idx.save(index_path)
     pipe = RetrievalPipeline(idx, chunks)
+    if flag_overrides:
+        from ..retrieval.flags import default_flags
+        pipe.flags = default_flags().with_overrides(**flag_overrides)
 
     spec = _provider_spec(use_llm and mode == "full")
     rows: list[dict] = []
