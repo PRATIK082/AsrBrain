@@ -1,20 +1,18 @@
 """Retrieval pipeline: plan -> filter -> hybrid channels -> fuse -> rerank -> expand.
 
-Phase 3 rewrote this module behind feature flags (``src/retrieval/flags.py``) so that every
-component can be ablated on the golden set. The measurable changes:
+Every stage is behind a feature flag (``src/retrieval/flags.py``) so ablations on the
+golden set decide what stays. The design points:
 
 * **exact-ID fast path** — a query that names a requirement id, an API name or an ECUC
   parameter retrieves the chunks that carry it directly, without waiting for the scorers.
-  §6.2 asks for this; the audit found the identifier only ever acted as a post-hoc rerank
-  boost (``src/retrieval/reranking.py``), which cannot recover a chunk the channels missed.
-* **the rewrite is used** — ``src/retrieval/query_rewriting.py`` produced a corrected query
-  that was then thrown away (AUDIT D-31). Both the original and the corrected form are now
-  scored and fused.
-* **the corrective loop** — when the evidence is too thin the query is retried without the
-  module constraint before the system gives up (§6.2).
-* **per-intent weighted fusion** — ``weighted_fusion`` existed and was never called; the raw
-  RRF score is around 0.02, which the reranker then weighted at 0.6, so the retrieval signal
-  carried about 2.8% of the final ranking (AUDIT D-59).
+  A post-hoc rerank boost alone cannot recover a chunk the channels never returned.
+* **the rewrite is used** — the corrected query form is scored and fused together with
+  the original instead of being thrown away.
+* **the corrective loop** — when the evidence is too thin the query is retried without
+  the module constraint before the system gives up.
+* **per-intent weighted fusion** — both channels are min-max normalised per intent, so
+  the fused score weighs against the overlap and exact-identifier signals on the same
+  scale (raw RRF values around 0.02 carried almost none of the final ranking).
 """
 from __future__ import annotations
 
@@ -50,8 +48,7 @@ class RetrievalPipeline:
         """The query plan, without retrieving anything.
 
         The clarify gate needs the plan and the corpus statistics but not the evidence, so
-        that a clarification no longer pays for a full retrieval that is then discarded
-        (AUDIT D-06).
+        that a clarification no longer pays for a full retrieval that is then discarded.
         """
         return parse(query)
 
@@ -121,7 +118,7 @@ class RetrievalPipeline:
         if self.flags.fusion == "rrf":
             # RRF works on ranks; the dense and BM25 channel scores are turned into rank
             # lists and the result is min-max normalised so that the reranker can weigh it
-            # against the other two signals on the same scale (AUDIT D-59).
+            # against the other two signals on the same scale.
             def to_ranks(scores: dict[str, float]) -> list[str]:
                 return [cid for cid, _ in sorted(scores.items(), key=lambda kv: -kv[1])]
             fused = rrf([to_ranks(bm25_scores), to_ranks(dense_scores)], k=settings.rrf_k)

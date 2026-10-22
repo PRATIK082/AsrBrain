@@ -1,6 +1,6 @@
 """Hybrid local index: TF-IDF dense-ish + BM25 sparse, SQLite-canonical backed, Qdrant-optional.
 
-Phase 1 (default): pure-local index stored under data/indexes/ — no server needed.
+The default local index is stored under data/indexes/ — no server needed.
 Qdrant adapter (src/indexing/qdrant_index.py) mirrors the same payload when QDRANT_URL is reachable.
 """
 from __future__ import annotations

@@ -1,11 +1,11 @@
 {
   "_comment": [
-    "CI gate thresholds for the evaluation harness (master prompt §9).",
+    "CI gate thresholds for the evaluation harness.",
     "A PR fails when a headline metric moves beyond the tolerance below.",
     "'min' means a HIGHER value is better; 'max' means a LOWER value is better.",
-    "The baselines are the measured numbers of the current system after the Phase 1 fixes",
-    "(D-01, D-54, D-57) - see docs/PHASE1_EVALUATION.md. Lowering a threshold is a",
-    "deliberate, reviewed change: raise the number only when a regression is accepted.",
+    "The baselines are the measured numbers of the current system. Lowering a",
+    "threshold is a deliberate, reviewed change: raise the number only when a",
+    "regression is accepted.",
     "The fixture-corpus thresholds for the pull-request gate live in eval_gate_ci.json."
   ],
   "metrics": {

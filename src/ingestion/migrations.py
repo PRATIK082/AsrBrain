@@ -1,4 +1,4 @@
-"""Versioned, reversible migrations for the canonical SQLite store (Phase 2).
+"""Versioned, reversible migrations for the canonical SQLite store.
 
 History: the store was created by inline ``CREATE TABLE IF NOT EXISTS`` + ``INSERT OR
 REPLACE`` with no version tracking, no provenance on records, and rollback by "restore the
@@ -10,14 +10,14 @@ file you remembered to copy". This module replaces that with:
   name the exact ingest that produced a chunk.
 * additive-only DDL — ``ALTER TABLE ... ADD COLUMN`` never rewrites user data, so each
   migration is reversible by restoring the pre-migration backup (see
-  ``scripts/backup_canonical.ps1``, M1).
+  ``scripts/backup_canonical.bat`` — back up before any migration).
 
 Version history:
 * v1 — legacy schema as created by ``src/ingestion/pipeline.py::SCHEMA`` (documents,
   chunks, tables, figures, 10/20/10/12 columns, no provenance).
 * v2 — provenance + run tracking: ``schema_version`` + ``ingest_runs`` tables and the new
-  nullable columns on all four evidence tables. All nullable, so v1 writers keep working
-  until they are switched (M4 deploys explicit column lists, which work on both shapes).
+  nullable columns on all four evidence tables. All nullable, so old writers keep working
+  until they are switched (writers use explicit column lists, which work on both shapes).
 """
 from __future__ import annotations
 

@@ -28,7 +28,7 @@ app = FastAPI(title="AsrBrain API")
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()
 _cancel: dict[str, bool] = {}
-# Phase 2 (D-33 fix): single source of truth — settings reads RAG_PIPELINE_VERSION
+# Single source of truth for the pipeline flag: settings reads RAG_PIPELINE_VERSION
 # first, ASRBRAIN_PIPELINE_VERSION as fallback.
 PIPELINE_VERSION = settings.pipeline_version
 
@@ -598,7 +598,7 @@ def api_tokens_get():
 
 
 # ---------------------------------------------------------------------------------------
-# Evaluation screen (master prompt §7 screen 7, §9)
+# Evaluation screen
 # ---------------------------------------------------------------------------------------
 
 EVAL_DIR = os.environ.get("EVAL_REPORTS_DIR", "reports/evaluation")

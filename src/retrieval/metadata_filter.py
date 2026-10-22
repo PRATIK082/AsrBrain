@@ -1,16 +1,14 @@
-"""Metadata hard filtering BEFORE semantic retrieval (spec §11).
+"""Metadata hard filtering BEFORE semantic retrieval.
 
-Phase 3 changed one thing here, and it is the single largest cause of the low context recall
-measured in Phase 1. The module filter used to be relaxed only when the surviving pool was
-*completely* empty. Chunks with an empty ``module`` field are always kept, so a plan that
-detected a module which is not in the corpus (for example ``CanIf``, inferred from the
-identifier ``SWS_CANIF_00072``) left a pool holding the 135 module-less project-source chunks.
-The pool was therefore never empty, the relaxation never fired, the 4,571 useful chunks were
-discarded, and the retriever returned **nothing** for a question whose answer was in the corpus
-(AUDIT D-56).
+The module filter is relaxed when the surviving pool is too small to answer the
+question — not only when it is completely empty. Chunks with an empty ``module`` field
+are always kept, so a plan that names a module which is absent from the indexed
+documents would otherwise leave a pool of only module-less project-source chunks while
+thousands of useful chunks are discarded, and the retriever returns nothing for a
+question whose answer is in the corpus.
 
-The relaxation now fires when the surviving pool is too small to answer the question, and the
-decision is reported in the trace so the user can see that a filter was dropped.
+The relaxation decision is reported in the trace so the user can see that a filter
+was dropped.
 """
 from __future__ import annotations
 

@@ -34,7 +34,7 @@ export interface DiffItem {
   compatibility_risk: string; migration_action?: string | null;
 }
 
-/* Evaluation screen (master prompt §7 screen 7, §9) */
+/* Evaluation screen */
 
 export interface EvalMetric {
   value: number | null;

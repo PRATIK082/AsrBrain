@@ -463,7 +463,7 @@ def render_report(payload: dict) -> str:
     lines += ["", "## Metric methods", ""]
     for name, how in payload["metrics_methods"].items():
         lines.append(f"- **{name}** — {how}")
-    lines += ["", "## Master prompt §3 targets", "",
+    lines += ["", "## Accuracy targets", "",
               "| Target | Required | Measured | Status |", "|---|---|---|---|"]
     targets = [
         ("citation precision", 0.98, agg["citation_precision"]["value"]),

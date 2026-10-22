@@ -1,7 +1,7 @@
-"""Regression tests for the defects the Phase 1 harness found.
+"""Regression tests for the defects the evaluation harness found.
 
-Each test names the defect it guards. If one of these fails, the corresponding fix has been
-undone and the Phase 1 baseline is no longer valid.
+Each test names the defect it guards. If one of these fails, the corresponding fix has
+been undone and the measured baseline is no longer valid.
 """
 import numpy as np
 

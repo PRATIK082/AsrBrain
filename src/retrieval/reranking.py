@@ -2,8 +2,8 @@
 from __future__ import annotations
 from ..indexing.hybrid import tokenize_technical
 
-# Legacy weights, kept as the default so existing callers see bit-identical scores.
-# The retrieval pipeline passes RetrievalFlags with the Phase 3 ablation weights instead.
+# Default weights, kept so existing callers see bit-identical scores.
+# The retrieval pipeline passes RetrievalFlags with the measured weights instead.
 _LEGACY_WEIGHTS = (0.6, 0.3, 0.4)
 
 

@@ -62,10 +62,9 @@ class Settings:
     pdf_dir: str = field(default_factory=lambda: _get("PDF_DIR", "pdf"))
     qdrant_url: str = field(default_factory=lambda: _get("QDRANT_URL", "http://localhost:6333"))
     qdrant_collection: str = field(default_factory=lambda: _get("QDRANT_COLLECTION", "autosar_chunks"))
-    # Enterprise orchestration Phase 2/3 feature flags (reversible migration)
-    # Phase 2 (D-33 fix): one source of truth for the pipeline flag. The API, the
-    # compose file and .env.example set RAG_PIPELINE_VERSION; the legacy
-    # ASRBRAIN_PIPELINE_VERSION spelling is still honoured as a fallback.
+    # One source of truth for the pipeline flag. The API, the compose file and
+    # .env.example set RAG_PIPELINE_VERSION; the legacy ASRBRAIN_PIPELINE_VERSION
+    # spelling is still honoured as a fallback.
     pipeline_version: str = field(default_factory=lambda: _get(
         "RAG_PIPELINE_VERSION", _get("ASRBRAIN_PIPELINE_VERSION", "v2")))
     arxml_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_ARXML_ENABLED", "true").lower() == "true")

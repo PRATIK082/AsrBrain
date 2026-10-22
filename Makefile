@@ -19,7 +19,7 @@ ui:
 test:
 	pytest -q
 
-# --- evaluation harness (master prompt §9) ---------------------------------------------
+# --- evaluation harness (a PR that regresses a headline metric beyond tolerance fails) ---
 # Windows has no `make`; run the commands under each target directly.
 
 # Build the golden set (350+ items) and freeze the hold-out split.
@@ -58,7 +58,8 @@ eval-fixture:
 	python -m src.evaluation.cli run --golden data/benchmarks/fixture_golden.jsonl --split data/benchmarks/fixture_holdout.json --canonical data/canonical/fixture.db --index data/indexes/fixture --out reports/evaluation/fixture --mode retrieval --label ci-fixture
 	python -m src.evaluation.gate --run reports/evaluation/fixture/latest.json --gate data/benchmarks/eval_gate_ci.json --report reports/evaluation/fixture/gate.json
 
-# Legacy v1 runner (kept for the committed artefact reports/evaluation/validated.json).
+# Legacy v1 runner (regenerates reports/evaluation/validated.json on demand; run
+# artefacts are not stored in git).
 eval-legacy:
 	python -m src.evaluation.run --benchmark data/benchmarks/autosar_benchmark_v1.jsonl --out reports/evaluation/validated.json
 

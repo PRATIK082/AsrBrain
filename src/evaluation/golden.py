@@ -1,4 +1,4 @@
-"""Golden-set schema, validation and coverage accounting (master prompt §9).
+"""Golden-set schema, validation and coverage accounting.
 
 A golden item is a JSON object with one line per item. The schema is a superset of the original
 v1 seed schema in :mod:`src.evaluation.datasets` so that old files still load.

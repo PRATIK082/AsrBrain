@@ -1,4 +1,4 @@
-"""Unit tests for the golden set, the frozen split and the CI gate (master prompt §9)."""
+"""Unit tests for the golden set, the frozen split and the CI gate."""
 import json
 import os
 import tempfile

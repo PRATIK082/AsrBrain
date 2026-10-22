@@ -1,6 +1,6 @@
 name: evaluation-gate
 
-# Master prompt §9: "a PR that drops any headline metric beyond the agreed tolerance fails".
+# A PR that drops any headline metric beyond the agreed tolerance fails.
 # The gate runs on the synthetic fixture corpus, so it needs no AUTOSAR PDF and no LLM.
 on:
   pull_request:

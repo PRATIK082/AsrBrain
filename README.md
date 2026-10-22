@@ -146,16 +146,17 @@ Streamlit + Ollama. Phase 2 adds OpenSearch; Phase 3 adds Neo4j/graph + Qdrant m
 
 ## Benchmark (measured, 2026-09-29)
 
-`reports/evaluation/validated.json` on the 1-PDF corpus (SOME/IP PRS R24-11, 169 chunks):
+Regenerate with `make eval-legacy` (run artefacts are not stored in git). Last recorded
+run on the 1-PDF corpus (SOME/IP PRS R24-11, 169 chunks):
 
 ```json
 {"n": 8, "hit_rate": 1.0, "abstention_rate": 0.5, "mean_claim_support": 0.3611, "p50_latency_s": 36.3}
 ```
 
 Read it as: in-corpus SOME/IP lookups answered with citations; the 4 CanIf/Classic
-comparison items correctly **abstained** (corpus gap — flagged `needs_human_validation`).
-No "95% accuracy" is claimed; see `reports/evaluation/comparison.md` and
-`docs/failure-analysis.md` for the honest breakdown. Latency is LLM-bound (~35 s/query on a
+comparison items correctly **abstained** (corpus gap). No "95% accuracy" is claimed;
+re-run `make eval-run` / `make eval-gate` for the current numbers — every change must
+show a metric delta. Latency is LLM-bound (~35 s/query on a
 14 B local model); retrieval itself is <0.5 s.
 
 ## Docker
@@ -175,5 +176,4 @@ re-index is needed either way. Source PDFs are never baked into images.
 
 UI has 👍 / 🚨 buttons. To add a gold case: append a JSON line to
 `data/benchmarks/autosar_benchmark_v1.jsonl` (schema in `src/evaluation/datasets.py`),
-then `make eval`. See `docs/operations-guide.md`, `docs/troubleshooting.md`,
-`docs/migration-risk-register.md`.
+then `make eval`. See `docs/operations-guide.md`, `docs/troubleshooting.md`.

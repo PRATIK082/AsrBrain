@@ -1,4 +1,4 @@
-"""Phase 2 regression tests: provenance contract, migration reversibility, repairs."""
+"""Regression tests for the provenance contract, migration reversibility and repairs."""
 import os
 import sqlite3
 

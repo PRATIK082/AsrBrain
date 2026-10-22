@@ -1,4 +1,4 @@
-"""Golden-set generation from the ingested corpus (master prompt §9).
+"""Golden-set generation from the ingested corpus.
 
 Design
 ------
@@ -112,8 +112,7 @@ def _api_only(chunk: dict) -> list[str]:
     """API names that are not requirement ids in disguise.
 
     ``api_names`` overlaps ``requirement_ids`` because the signal extractor uses the same
-    identifier pattern for both (see AUDIT D-55); this filter keeps the two item families
-    distinct.
+    identifier pattern for both; this filter keeps the two item families distinct.
     """
     return [a for a in chunk["api_names"] if not REQ_ID_RE.match(a)]
 

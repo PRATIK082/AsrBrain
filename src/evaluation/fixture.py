@@ -7,8 +7,8 @@ materialises a small, *synthetic* AUTOSAR-shaped corpus with the same schema, th
 records, so the harness exercises the real code paths end to end.
 
 Nothing here is derived from a real standard: the identifiers, module names and sentences are
-invented. That is also what §11 of the master prompt requires — ship ingestion tooling and
-synthetic data only.
+invented. Only ingestion tooling and synthetic data ship in the repository — never the
+paid standard documents themselves.
 
     python -m src.evaluation.fixture --out data/canonical/fixture.db
 """

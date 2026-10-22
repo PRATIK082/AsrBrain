@@ -35,8 +35,8 @@ def build_chunks(document_id: str, source_pdf: str, sha: str, release: str, plat
                 if len(window) < 40:
                     continue
                 cid = _stable_id(document_id, str(pg.index), str(pi), str(w))
-                # Phase 2: parsers that yield document-level text (docling) set
-                # page_unknown; their page numbers are NULL, never a false page 1.
+                # Parsers that yield document-level text (docling) set page_unknown;
+                # their page numbers are NULL, never a false page 1.
                 unknown = bool(getattr(pg, "page_unknown", False))
                 atomics.append(Chunk(
                     chunk_id=cid, document_id=document_id, source_pdf=source_pdf,
@@ -48,9 +48,8 @@ def build_chunks(document_id: str, source_pdf: str, sha: str, release: str, plat
                     module=module, document_type=doctype,
                     section_number=sig["headings"][0][0] if sig["headings"] else "",
                     section_title=sig["headings"][0][1] if sig["headings"] else "",
-                    # Phase 2: no per-chunk truncation. The exact-token guard requires a
-                    # cited [SWS_...] to be present in the chunk's requirement_ids; the
-                    # old [:10] cap silently dropped normative IDs with no warning.
+                    # No per-chunk truncation: a cited [SWS_...] must be present in the
+                    # chunk's requirement_ids, and a fixed cap silently drops IDs.
                     requirement_ids=sig["requirement_ids"], api_names=sig["api_names"],
                     ecu_parameters=sig["ecu_parameters"],
                     text=window, normalized_text=re.sub(r"\s+", " ", window).strip(),
@@ -72,7 +71,7 @@ def build_chunks(document_id: str, source_pdf: str, sha: str, release: str, plat
             section_title=buf[0].section_title,
             requirement_ids=sorted({r for c in buf for r in c.requirement_ids}),
             api_names=sorted({a for c in buf for a in c.api_names}),
-            # Phase 2 repair: context chunks used to drop ecu_parameters entirely.
+            # Context chunks carry the union of their atomics' ECUC parameters too.
             ecu_parameters=sorted({e for c in buf for e in c.ecu_parameters}),
             text=text, normalized_text=re.sub(r"\s+", " ", text).strip(), chunk_kind="context"))
         for c in buf:

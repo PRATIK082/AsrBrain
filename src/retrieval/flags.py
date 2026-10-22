@@ -1,10 +1,11 @@
-"""Retrieval feature flags (master prompt §3, §6.2, §12 Phase 3).
+"""Retrieval feature flags: every retrieval component behind an env-driven switch.
 
-Every retrieval component is behind a flag so that the ablation table in Phase 3 can be
-measured on the golden set instead of argued about. The flags have a single source of truth
-here, on purpose: the audit found the product reading ``ASRBRAIN_PIPELINE_VERSION`` while the
-API, the compose file and ``.env.example`` all set ``RAG_PIPELINE_VERSION`` (AUDIT D-33), and
-two spellings of one flag is how a "reversible migration" quietly stops being reversible.
+Each component (channels, fusion mode, reranking weights, filters, expansion, exact-ID
+path, rewrite, corrective loop) can be toggled independently so that ablations on the
+golden set measure instead of argue. There is a single source of truth for flags here:
+the pipeline flag is read from ``RAG_PIPELINE_VERSION`` with the legacy
+``ASRBRAIN_PIPELINE_VERSION`` spelling as fallback, because two spellings of one flag
+is how a reversible setup quietly stops being reversible.
 
 Environment variables use the ``ASRBRAIN_RETRIEVAL_`` prefix and a boolean or numeric value::
 
@@ -41,8 +42,8 @@ def _env_float(name: str, default: float) -> float:
 class RetrievalFlags:
     """Which retrieval components are active.
 
-    The weights are the ones the Phase 3 ablation settled on; they are documented in
-    ``docs/PHASE3_RETRIEVAL.md`` together with the measurements that produced them.
+    The default weights are the starting point; keep the set that the ablation
+    measurements support and change the rest with the numbers on record.
     """
 
     # --- channels -------------------------------------------------------------
@@ -60,9 +61,9 @@ class RetrievalFlags:
     # --- filtering ------------------------------------------------------------
     version_filter: bool = True
     module_filter: bool = True
-    #: relax the module filter when the surviving pool is smaller than this share of the
-    #: corpus (AUDIT D-56: a module absent from the corpus left only the module-less
-    #: project-source chunks, and the relaxation never fired)
+    #: relax the module filter when the surviving pool is smaller than this share of
+    #: the corpus (a module absent from the indexed documents would otherwise leave
+    #: only the module-less project-source chunks and answer from almost nothing)
     pool_relax_ratio: float = 0.02
 
     # --- expansion ------------------------------------------------------------

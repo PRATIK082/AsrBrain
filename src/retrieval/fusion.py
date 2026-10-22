@@ -15,7 +15,7 @@ def normalise_scores(scores: dict[str, float]) -> dict[str, float]:
 
     Shared by ``weighted_fusion`` and the RRF path in the retrieval pipeline, so that a
     fused score (raw RRF values sit around 0.02) can be weighed against the overlap and
-    exact-identifier signals on the same scale (AUDIT D-59).
+    exact-identifier signals on the same scale.
     """
     if not scores:
         return {}

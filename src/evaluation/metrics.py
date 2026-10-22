@@ -1,4 +1,5 @@
-"""Retrieval + answer + operational metrics (spec §22, master prompt §3 and §9).
+"""Retrieval + answer + operational metrics: citation precision, faithfulness,
+correctness, abstention quality, hallucinated-identifier rate, latency.
 
 Design rules for this module
 ----------------------------
@@ -244,7 +245,7 @@ def exact_id_match(gold_requirement_ids: list[str], answer: str) -> float:
 def hallucinated_id_rate(answer: str, evidence_texts: list[str]) -> tuple[float, list[str]]:
     """Share of the answer's identifiers that appear in no retrieved chunk.
 
-    Returns ``(rate, offending_identifiers)``. This is the metric behind the master prompt's
+    Returns ``(rate, offending_identifiers)``. This is the metric behind the
     "hallucinated IDs / identifiers <= 0.5%" target.
     """
     ids = extract_identifiers(answer)

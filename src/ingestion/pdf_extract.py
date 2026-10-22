@@ -79,9 +79,8 @@ def normalize_page_text(t: str) -> str:
 
 REQ_PATTERNS = [
     re.compile(r"\b((?:SWS|RS|PRS)_[A-Za-z0-9_]+)"),
-    # Phase 2: bracket citations come in every requirement family, not just PRS.
-    # The accuracy contract blocks answers whose [SWS_...]/[constr_...] is not in the
-    # cited evidence, so missing them here directly caused abstentions.
+    # Bracket citations come in every requirement family, not just PRS; missing them
+    # here means the cited evidence can never contain the cited identifier.
     re.compile(r"\[((?:SWS|RS|PRS|SRS|TPS|constr)_[A-Za-z0-9_\-]+)\]"),
 ]
 API_PATTERN = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:_[A-Z][A-Za-z0-9_]*)+)\b")

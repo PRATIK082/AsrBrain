@@ -1,4 +1,4 @@
-"""Frozen train / hold-out split for the golden set (master prompt §9, §3).
+"""Frozen train / hold-out split for the golden set.
 
 The split is **deterministic**: a query lands in the hold-out when
 ``sha256(query_id + salt)`` falls in the bottom ``holdout_ratio`` of the hash space. Nothing about
@@ -47,8 +47,7 @@ def save_split(path: str, items: list[dict], golden_path: str, ratio: float = DE
         "counts": {"train": len(parts["train"]), "holdout": len(parts["holdout"])},
         "train": parts["train"],
         "holdout": parts["holdout"],
-        "note": "Hold-out is scored for reporting only. Never tune a change on it "
-                "(master prompt §3).",
+        "note": "Hold-out is scored for reporting only. Never tune a change on it.",
     }
     parent = os.path.dirname(path)
     if parent:

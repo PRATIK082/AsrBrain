@@ -76,7 +76,7 @@
     "q-X-1207"
   ],
   "holdout_ratio": 0.2,
-  "note": "Hold-out is scored for reporting only. Never tune a change on it (master prompt \u00a73).",
+  "note": "Hold-out is scored for reporting only. Never tune a change on it.",
   "salt": "asrbrain-holdout-2026",
   "train": [
     "q-A-0041",

@@ -172,10 +172,10 @@ def _read_text(fp: str, limit: int = 200_000) -> str:
 def _arxml_summary(text: str) -> str:
     """Deterministic topology sketch so the chunk is findable by SWC/port name.
 
-    Phase 2 repair: ``parse_arxml`` takes a filesystem path (not text) and returns an
+    ``parse_arxml`` takes a filesystem path (not text) and returns an
     ``ArxmlTopology`` model (not a dict). The text is staged to a temp file and the
     model is read via attribute access. Any failure still yields "" — a missing summary
-    must never break ingestion — but the caller now logs it instead of swallowing it.
+    must never break ingestion.
     """
     import tempfile
     tmp = None

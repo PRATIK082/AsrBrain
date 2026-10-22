@@ -79,6 +79,6 @@ def test_report_states_the_target_comparison():
                        out_dir=out, split_path=split, mode="retrieval", use_llm=False)
         with open(os.path.join(out, "report.md"), encoding="utf-8") as fh:
             report = fh.read()
-        assert "Master prompt §3 targets" in report
+        assert "Accuracy targets" in report
         assert "MET" in report or "MISSED" in report
         assert "20 worst failures" in report

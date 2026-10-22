@@ -1,4 +1,4 @@
-"""Unit tests for the evaluation metric library (master prompt §9)."""
+"""Unit tests for the evaluation metric library."""
 import math
 
 from src.evaluation import metrics as M

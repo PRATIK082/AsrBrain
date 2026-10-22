@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 rem ===========================================================================
 rem  AsrBrain - back up the canonical store + local index before a migration
-rem  (Phase 2, M1: reversible migrations - back up before any DB migration).
+rem  (reversible migrations - back up before any DB migration).
 rem
 rem  Usage:
 rem    scripts\backup_canonical.bat            back up data\canonical + data\indexes
