@@ -170,19 +170,41 @@ def _read_text(fp: str, limit: int = 200_000) -> str:
 
 
 def _arxml_summary(text: str) -> str:
-    """Deterministic topology sketch so the chunk is findable by SWC/port name."""
+    """Deterministic topology sketch so the chunk is findable by SWC/port name.
+
+    Phase 2 repair: ``parse_arxml`` takes a filesystem path (not text) and returns an
+    ``ArxmlTopology`` model (not a dict). The text is staged to a temp file and the
+    model is read via attribute access. Any failure still yields "" — a missing summary
+    must never break ingestion — but the caller now logs it instead of swallowing it.
+    """
+    import tempfile
+    tmp = None
     try:
         from .arxml.parser import parse_arxml
-        topo = parse_arxml(text, artifact_id="summary").get("topology", {})
+        with tempfile.NamedTemporaryFile("w", suffix=".arxml", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(text[:500_000])
+            tmp = f.name
+        topo = parse_arxml(tmp)
         parts = []
-        for swc in topo.get("software_components", [])[:40]:
-            ports = ", ".join(p.get("name", "") for p in swc.get("ports", [])[:12])
-            parts.append(f"SWC {swc.get('name')} [{swc.get('kind')}]: {ports}")
-        for c in topo.get("connectors", [])[:40]:
-            parts.append(f"CONN {c.get('name')}: {c.get('source')} -> {c.get('target')}")
+        for swc in (topo.components or [])[:40]:
+            ports = ", ".join((p or "") for p in (swc.ports or [])[:12])
+            parts.append(f"SWC {swc.short_name} [{swc.component_type}]: {ports}")
+        for c in (topo.connectors or [])[:40]:
+            src = c.provider_port_ref or c.provider_component_ref or "?"
+            dst = c.requester_port_ref or c.requester_component_ref or "?"
+            parts.append(f"CONN [{c.connector_type}]: {src} -> {dst}")
+        for e in (topo.ecuc_parameters or [])[:40]:
+            parts.append(f"ECUC {e.qualified_path or e.short_name} = {e.value}")
         return "\n".join(parts)[:4000]
     except Exception:
         return ""
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def chunk_file(fp: str, kind: str, src: dict, rel: str) -> list[dict]:
@@ -202,16 +224,21 @@ def chunk_file(fp: str, kind: str, src: dict, rel: str) -> list[dict]:
         if len(blocks) > 60:
             break
     chunks = []
-    sha = hashlib.sha256(fp.encode()).hexdigest()[:12]
+    # M4: identity is content-derived (path + bytes), not path-derived. Two different
+    # revisions of the same file get different ids instead of silently colliding.
+    fid = hashlib.sha256((rel + "\0" + text).encode("utf-8", "replace")).hexdigest()[:12]
     for n, b in enumerate(blocks):
-        cid = f"ps-{src['source_id'][:8]}-{sha}-{n}"
+        cid = f"ps-{src['source_id'][:8]}-{fid}-{n}"
         label = f"{scope_tag} {rel} part{n}" if n else f"{scope_tag} {rel}"
+        # M4: code/config chunks are not PDF pages — page_* stay NULL (they used to
+        # carry the chunk ordinal, which cited as a false PDF page). The position in
+        # the file is already in section_title ("... partN").
         chunks.append({
             "chunk_id": cid,
             "document_id": src["source_id"],
             "source_pdf": f"{tenant_tag} {rel}",
-            "sha256": sha,
-            "page_start": n, "page_end": n, "pdf_page_index": n,
+            "sha256": hashlib.sha256(b.encode("utf-8", "replace")).hexdigest()[:32],
+            "page_start": None, "page_end": None, "pdf_page_index": None,
             "autosar_release": "", "platform": "", "module": "",
             "document_type": kind,
             "section_number": "", "section_title": label,
@@ -238,29 +265,50 @@ def ingest_source(source_id: str, canonical_db: str = "data/canonical/canonical.
             else os.path.basename(fp)
         all_chunks.extend(chunk_file(fp, kind, src, rel))
     conn = sqlite3.connect(canonical_db)
-    conn.execute("""CREATE TABLE IF NOT EXISTS documents(document_id TEXT PRIMARY KEY,
-        source_pdf TEXT, sha256 TEXT, title TEXT, autosar_release TEXT, platform TEXT,
-        module TEXT, document_type TEXT, page_count INT, quality REAL)""")
-    conn.execute("""CREATE TABLE IF NOT EXISTS chunks(chunk_id TEXT PRIMARY KEY,
-        document_id TEXT, source_pdf TEXT, sha256 TEXT, page_start INT, page_end INT,
-        pdf_page_index INT, autosar_release TEXT, platform TEXT, module TEXT,
-        document_type TEXT, section_number TEXT, section_title TEXT,
-        requirement_ids TEXT, api_names TEXT, ecu_parameters TEXT,
-        parent_chunk_id TEXT, chunk_kind TEXT, text TEXT, normalized_text TEXT)""")
-    conn.execute("INSERT OR REPLACE INTO documents VALUES (?,?,?,?,?,?,?,?,?,?)",
-                 (src["source_id"], src["local_path"], src["source_id"],
-                  f"{src['name']} [{src['scope_type']}:{src['scope_name']}]",
-                  "", "", "", src.get("kind", "mixed"), len(files), 1.0))
-    for c in all_chunks:
-        conn.execute("INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                     (c["chunk_id"], c["document_id"], c["source_pdf"], c["sha256"],
-                      c["page_start"], c["page_end"], c["pdf_page_index"],
-                      c["autosar_release"], c["platform"], c["module"],
-                      c["document_type"], c["section_number"], c["section_title"],
-                      json.dumps(c["requirement_ids"]), json.dumps(c["api_names"]),
-                      json.dumps(c["ecu_parameters"]), c["parent_chunk_id"],
-                      c["chunk_kind"], c["text"], c["normalized_text"]))
-    conn.commit()
+    from .migrations import migrate, new_run, close_run
+    migrate(conn)  # M2: idempotent, no-op once applied
+    snapshot_id = new_run(conn, source_fingerprint=src["local_path"])
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS documents(document_id TEXT PRIMARY KEY,
+            source_pdf TEXT, sha256 TEXT, title TEXT, autosar_release TEXT, platform TEXT,
+            module TEXT, document_type TEXT, page_count INT, quality REAL)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS chunks(chunk_id TEXT PRIMARY KEY,
+            document_id TEXT, source_pdf TEXT, sha256 TEXT, page_start INT, page_end INT,
+            pdf_page_index INT, autosar_release TEXT, platform TEXT, module TEXT,
+            document_type TEXT, section_number TEXT, section_title TEXT,
+            requirement_ids TEXT, api_names TEXT, ecu_parameters TEXT,
+            parent_chunk_id TEXT, chunk_kind TEXT, text TEXT, normalized_text TEXT)""")
+        migrate(conn)
+        file_fp = hashlib.sha256("|".join(
+            sorted(f[0] for f in files)).encode("utf-8", "replace")).hexdigest()[:32]
+        conn.execute("INSERT OR REPLACE INTO documents(document_id, source_pdf, sha256,"
+                     " title, autosar_release, platform, module, document_type, page_count,"
+                     " quality, snapshot_id, content_hash, created_by, confidence)"
+                     " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (src["source_id"], src["local_path"], file_fp,
+                      f"{src['name']} [{src['scope_type']}:{src['scope_name']}]",
+                      "", "", "", src.get("kind", "mixed"), len(files), 1.0,
+                      snapshot_id, file_fp, "parser", 1.0))
+        for c in all_chunks:
+            from .migrations import content_hash
+            conn.execute("INSERT OR REPLACE INTO chunks(chunk_id, document_id, source_pdf,"
+                         " sha256, page_start, page_end, pdf_page_index, autosar_release,"
+                         " platform, module, document_type, section_number, section_title,"
+                         " requirement_ids, api_names, ecu_parameters, parent_chunk_id,"
+                         " chunk_kind, text, normalized_text,"
+                         " snapshot_id, content_hash, created_by, confidence)"
+                         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (c["chunk_id"], c["document_id"], c["source_pdf"], c["sha256"],
+                          c["page_start"], c["page_end"], c["pdf_page_index"],
+                          c["autosar_release"], c["platform"], c["module"],
+                          c["document_type"], c["section_number"], c["section_title"],
+                          json.dumps(c["requirement_ids"]), json.dumps(c["api_names"]),
+                          json.dumps(c["ecu_parameters"]), c["parent_chunk_id"],
+                          c["chunk_kind"], c["text"], c["normalized_text"],
+                          snapshot_id, content_hash(c["normalized_text"]), "parser", 1.0))
+        conn.commit()
+    finally:
+        close_run(conn, snapshot_id)
     conn.close()
     src["files_indexed"] = len(files)
     src["chunks_indexed"] = len(all_chunks)

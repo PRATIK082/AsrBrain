@@ -97,21 +97,25 @@ class HybridIndex:
         q_terms = tokenize_technical(q)
         n = len(tokenized)
         scores = np.zeros(n)
-        for term in set(q_terms):
+        # `sorted` keeps the accumulation order stable, so the result does not depend on
+        # set iteration order (which varies per process because string hashing is salted).
+        for term in sorted(set(q_terms)):
             idf = np.log((n - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5) + 1.0)
-        for i, toks in enumerate(self.tokenized):
+            for i, toks in enumerate(tokenized):
                 f = toks.count(term)
                 if f:
                     denom = f + k1 * (1 - b + b * len(toks) / (avgdl or 1))
                     scores[i] += idf * (f * (k1 + 1) / denom)
         return scores
 
-    def save(self, path: str):
+    def save(self, path: str, fingerprint: dict | None = None):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         np.savez_compressed(path + ".npz", matrix=self.doc_matrix, idf=self.idf)
         with open(path + ".meta.json", "w") as f:
             json.dump({"chunk_ids": self.chunk_ids, "payloads": self.payloads,
-                       "texts": self.texts, "vocab": self.vocab}, f)
+                        "texts": self.texts, "vocab": self.vocab,
+                        # Phase 2: staleness is proven by content, not by row count.
+                        "fingerprint": fingerprint or {}}, f)
 
     @classmethod
     def load(cls, path: str) -> "HybridIndex":
@@ -121,7 +125,24 @@ class HybridIndex:
         with open(path + ".meta.json") as f:
             m = json.load(f)
         idx.chunk_ids, idx.payloads, idx.texts, idx.vocab = m["chunk_ids"], m["payloads"], m["texts"], m["vocab"]
+        idx.meta_fingerprint = m.get("fingerprint", {})
         return idx
+
+
+def db_fingerprint(canonical_db: str) -> dict:
+    """Content fingerprint of the chunks table: row count + sha over sorted chunk ids.
+
+    Phase 2: the API used to call an index fresh when only the row count matched, so a
+    re-ingest that replaced content at the same row count silently served stale vectors.
+    """
+    import hashlib
+    conn = sqlite3.connect(canonical_db)
+    try:
+        ids = [r[0] for r in conn.execute("SELECT chunk_id FROM chunks ORDER BY chunk_id")]
+    finally:
+        conn.close()
+    digest = hashlib.sha256("|".join(ids).encode()).hexdigest()[:32]
+    return {"count": len(ids), "ids_hash": digest}
 
 
 def load_chunks(canonical_db: str) -> list[dict]:

@@ -22,6 +22,10 @@ class ParsedPage:
     needs_review: list[str] = field(default_factory=list)
     parser: str = ""
     image_path: str | None = None
+    # Phase 2: True when the parser only yields document-level text (docling). Page
+    # numbers derived from such output are meaningless; chunking stamps NULL instead
+    # of a false page 1 so citations cannot claim a page that was never measured.
+    page_unknown: bool = False
 
 
 class BaseParser:
@@ -102,7 +106,10 @@ class DoclingParser(BaseParser):
         full = result.document.export_to_text()
         # docling gives document-level text: single logical page; keep page-aware fallback text
         tabs, figs = _extract_captions(full, 0)
-        return [ParsedPage(0, full, len(full), tabs, figs, [], self.name)]
+        pg = ParsedPage(0, full, len(full), tabs, figs, [], self.name)
+        pg.page_unknown = True
+        pg.needs_review.append("docling_page_provenance_collapsed")
+        return [pg]
 
 
 class MinerUParser(BaseParser):

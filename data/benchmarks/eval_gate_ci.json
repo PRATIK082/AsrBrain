@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "CI gate thresholds measured on the synthetic fixture corpus (src/evaluation/fixture.py).",
+    "The fixture is fast and deterministic, so this gate runs on every pull request.",
+    "The real-corpus thresholds live in eval_gate.json and are checked locally and nightly.",
+    "'min' means a HIGHER value is better; 'max' means a LOWER value is better."
+  ],
+  "metrics": {
+    "context_recall": {"min": 0.4888, "tolerance": 0.03},
+    "hit_rate": {"min": 0.8, "tolerance": 0.05},
+    "latency_p95_s": {"max": 2.0, "tolerance": 1.0}
+  }
+}

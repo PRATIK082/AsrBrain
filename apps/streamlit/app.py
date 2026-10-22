@@ -60,7 +60,7 @@ def _compact_sources(src: str) -> list[str]:
     return lines
 
 from src.config.settings import settings, TOKEN_CAPS
-from src.indexing.hybrid import HybridIndex, load_chunks
+from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
@@ -90,15 +90,17 @@ store = ChatStore()
 @st.cache_resource
 def _engine():
     chunks = load_chunks(settings.canonical_db)
+    # Phase 2: staleness is proven by content fingerprint, not row count (same as API).
+    fp_now = db_fingerprint(settings.canonical_db)
     try:
         idx = HybridIndex.load("data/indexes/hybrid")
-        if len(idx.chunk_ids) != len(chunks):
+        if getattr(idx, "meta_fingerprint", {}) != fp_now:
             raise ValueError("stale")
     except Exception:
         idx = HybridIndex()
         idx.build(chunks or [{"chunk_id": "empty", "normalized_text": "",
                               "section_title": "", "requirement_ids": [], "api_names": []}])
-        idx.save("data/indexes/hybrid")
+        idx.save("data/indexes/hybrid", fingerprint=fp_now)
     return RetrievalPipeline(idx, chunks)
 
 
@@ -286,7 +288,7 @@ with st.sidebar:
             chunks = load_chunks(settings.canonical_db)
             idx = HybridIndex()
             idx.build(chunks)
-            idx.save("data/indexes/hybrid")
+            idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
             _engine.clear()
             prog.progress(100, text="Done")
             st.success(f"Ingested {up.name} in {int(_t.time()-t0)}s — {res.get('documents', '?')} doc(s) indexed.")
@@ -318,7 +320,7 @@ with st.sidebar:
             chunks = load_chunks(settings.canonical_db)
             idx = HybridIndex()
             idx.build(chunks)
-            idx.save("data/indexes/hybrid")
+            idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
             _engine.clear()
             st.success(f"Indexed {res['files']} file(s) → {res['chunks']} chunks "
                        f"under [{rec['scope_type']}:{rec['scope_name']}]. Ask about them in Chat.")
@@ -466,6 +468,7 @@ with tab_chat:
             acc, final_ev = "", None
             ev_cards: list[dict] = []
             clarify_ev = None
+            err_msg = ""
             alive = True
             while alive:
                 try:
@@ -481,6 +484,8 @@ with tab_chat:
                     break
                 kind = ev.get("event")
                 if kind == "status":
+                    if ev.get("stage") == "error":
+                        err_msg = ev.get("message", "")
                     status.update(label=f"{ev.get('stage')}: {ev.get('message')}", state="running")
                 elif kind == "clarify":
                     clarify_ev = ev
@@ -500,6 +505,13 @@ with tab_chat:
                                   {"clarify": clarify_ev.get("missing", [])})
                 st.rerun()
             full = (final_ev or {}).get("answer", acc)
+            if not (full or "").strip():
+                # Never persist or render a silent empty answer: say what happened.
+                full = ("⚠️ The answer run produced no output"
+                        + (f": {err_msg}" if err_msg else
+                           " (no answer event arrived — the run may have been stopped).")
+                        + " Please retry; if it repeats, check the Trace tab and report the "
+                          "last status message.")
             body, src = _split_sources(full)
             ph.markdown(body)  # chat shows the answer; sources collapse below
             if src.strip():
@@ -630,7 +642,7 @@ with tab_src:
                     chunks = load_chunks(settings.canonical_db)
                     idx = HybridIndex()
                     idx.build(chunks)
-                    idx.save("data/indexes/hybrid")
+                    idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
                     _engine.clear()
                 st.success(f"Linked **{sname}** [{rec['scope_type']}:{rec['scope_name']}] — "
                            f"{res['files']} files → {res['chunks']} chunks. Ask about it in Chat.")
@@ -651,7 +663,7 @@ with tab_src:
                     chunks = load_chunks(settings.canonical_db)
                     idx = HybridIndex()
                     idx.build(chunks)
-                    idx.save("data/indexes/hybrid")
+                    idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
                     _engine.clear()
                 st.success(f"Re-indexed: {res['chunks']} chunks.")
             except Exception as e:

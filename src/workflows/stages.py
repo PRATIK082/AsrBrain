@@ -50,14 +50,18 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
            "message": "Identifying release, platform, module, and intent"}
     if cancel.get("stop"):
         return
-    ret = pipe.retrieve(query, top_k_final=top_k or 0)
-    plan = ret["plan"]
+    # Plan first, retrieve after the clarify gate: the confirmed slots (release /
+    # platform / module the user just picked) must constrain retrieval. Retrieving
+    # with the raw plan and patching the dict afterwards answered from stale
+    # evidence — including empty evidence after a clarification round.
+    plan_obj = pipe.plan_for(query)
     if known_slots:
         for k in ("releases", "platforms", "modules"):
             if known_slots.get(k):
-                plan[k] = known_slots[k]
+                setattr(plan_obj, k, list(known_slots[k]))
         if known_slots.get("releases"):
-            plan["release_mode"] = "exact" if len(known_slots["releases"]) == 1 else "comparison"
+            plan_obj.release_mode = "exact" if len(known_slots["releases"]) == 1 else "comparison"
+    plan = plan_obj.model_dump()
     # clarification gate (req. 1): ask back only when corpus actually spans versions
     try:
         corpus_releases = sorted({c.get("autosar_release", "") for c in pipe.chunks if c.get("autosar_release")})
@@ -77,6 +81,8 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
            "plan": plan}
     if cancel.get("stop"):
         return
+    ret = pipe.retrieve(query, top_k_final=top_k or 0, plan=plan_obj)
+    plan = ret["plan"]
     evidence = ret["evidence"]
     for branch in ("text_retrieval", "table_retrieval", "graph_retrieval", "fusion_rerank",
                    "expansion_compression"):

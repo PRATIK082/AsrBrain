@@ -17,6 +17,25 @@ Thumbs.db
 .coverage
 # user uploads must never be committed
 pdf/uploads/
+# customer project sources (ARXML uploads, git clones) and derived blobs
+# must never be committed - they contain OEM/customer data (ADR-0001, R-13)
+data/sources/
+data/objects/
+data/graph/
+data/raw/
+# generated evaluation artefacts: the golden set, the split and the gate thresholds are
+# committed, the run payloads are not (they are half a megabyte each and regenerable)
+reports/evaluation/run-*.json
+reports/evaluation/latest.json
+reports/evaluation/failures.csv
+reports/evaluation/fixture_review.csv
+reports/evaluation/fixture/
+reports/evaluation/runs/
+reports/evaluation/report.md
+data/benchmarks/fixture_golden.jsonl
+data/benchmarks/fixture_holdout.json
+# pre-migration safety copies (scripts/backup_canonical.bat); machine-local, never commit
+data/backups/
 # frontend build artefacts
 frontend/node_modules/
 frontend/.next/
@@ -25,3 +44,7 @@ frontend/next-env.d.ts
 frontend/tsconfig.tsbuildinfo
 # local Streamlit secrets
 .streamlit/secrets.toml
+
+# local launcher (Windows convenience, not part of the product)
+dev-api.bat
+dev-chat.bat
