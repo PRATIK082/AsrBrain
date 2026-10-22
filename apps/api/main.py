@@ -558,6 +558,39 @@ def api_diagram_analyze(req: DiagramRequest):
             "note": "Supplemental only — cite the original figure for normative claims; processed locally."}
 
 
+class DiagramRecreateRequest(BaseModel):
+    pdf_path: str = ""
+    page: int = 0
+    pages: list[int] | None = None
+    dpi: int = 200
+    caption: str = ""
+    provider: str = ""
+    model: str = ""
+
+
+@app.post("/api/diagrams/recreate")
+def api_diagram_recreate(req: DiagramRecreateRequest):
+    """Recreate PDF flowchart/diagram pages as validated ```mermaid blocks.
+
+    Body: {pdf_path, page|pages, dpi, caption, provider, model}.
+    Never breaks on missing pymupdf/vision — returns text fallback per page.
+    """
+    from src.ingestion.diagram_mermaid import recreate_diagrams_for_pdf
+    if not req.pdf_path:
+        raise HTTPException(400, "pdf_path is required")
+    target = req.pages if req.pages is not None else [req.page]
+    try:
+        results = recreate_diagrams_for_pdf(req.pdf_path, pages=target, dpi=req.dpi,
+                                            caption=req.caption, provider=req.provider,
+                                            model=req.model)
+    except FileNotFoundError:
+        raise HTTPException(404, "pdf not found")
+    except Exception as e:
+        raise HTTPException(500, f"diagram recreation failed: {e}")
+    return {"results": results,
+            "note": "Supplemental only — cite the original figure for normative claims; processed locally."}
+
+
 class SourceRegisterRequest(BaseModel):
     name: str
     location: str  # local PC folder/file or server Git link

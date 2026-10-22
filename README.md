@@ -172,7 +172,7 @@ make docker-full       # + neo4j + redis + react frontend
 `/query` unchanged; v2 stores (`tables`, `figures`) are ignored, chunk IDs stable so no
 re-index is needed either way. Source PDFs are never baked into images.
 
-## Contributing / feedback
+## Contribute and shape the roadmap
 
 UI has 👍 / 🚨 buttons. To add a gold case: append a JSON line to
 `data/benchmarks/autosar_benchmark_v1.jsonl` (schema in `src/evaluation/datasets.py`),

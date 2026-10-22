@@ -1,0 +1,56 @@
+name: Feature or requirement proposal
+description: Propose a capability, workflow, integration, or engineering requirement for AsrBrain.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for new requirements as well as feature ideas. Focus on the engineering problem and how the outcome can be validated. Do not submit proprietary AUTOSAR content, customer data, or confidential documents.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem or requirement
+      description: Who needs this, what task are they trying to complete, and what limitation exists today?
+      placeholder: As a ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Ingestion and document parsing
+        - Retrieval and evidence ranking
+        - Citation validation and answer quality
+        - AUTOSAR release/module/platform understanding
+        - UI and conversation workflow
+        - API, integration, or deployment
+        - Evaluation and benchmarking
+        - Documentation or examples
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful solution. Screenshots/diagrams are welcome if they contain no confidential information.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions or tests that would demonstrate the requirement is met.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints
+      description: Mention workarounds, compatibility needs, privacy/licensing limits, or performance concerns.
+    validations:
+      required: false
