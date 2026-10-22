@@ -35,6 +35,16 @@ def test_diag_shorthand_expands():
     assert any(a == "diag" for a, _ in changes)
 
 
+def test_component_typo_self_heals_for_alias_match():
+    # "sw componet" (0.80) misses the fuzzy cutoff against the multi-word alias,
+    # but componet->component (0.94) lets the "sw component" alias match downstream.
+    fixed, changes = correct_query("need deatiled information on application sw componet configuration")
+    assert "component" in fixed and "detailed" in fixed
+    assert any(a == "componet" and b == "component" for a, b in changes)
+    from src.retrieval.query_understanding import parse
+    assert "RTE" in parse(fixed).modules
+
+
 def test_user_typo_sentence_fixed():
     fixed, changes = correct_query(
         "what alla re the element requared for configuration and hot to map "

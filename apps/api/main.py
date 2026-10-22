@@ -14,12 +14,12 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from src.config.settings import settings
-from src.indexing.hybrid import HybridIndex, load_chunks
+from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.router import answer_query
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
-from src.chat.store import ChatStore
+from src.chat.store import ChatStore, classify_outcome
 from src.ingestion.pipeline import run as run_ingest
 from src.evaluation.datasets import write_seed
 
@@ -28,7 +28,9 @@ app = FastAPI(title="AsrBrain API")
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()
 _cancel: dict[str, bool] = {}
-PIPELINE_VERSION = os.environ.get("RAG_PIPELINE_VERSION", "v2")
+# Single source of truth for the pipeline flag: settings reads RAG_PIPELINE_VERSION
+# first, ASRBRAIN_PIPELINE_VERSION as fallback.
+PIPELINE_VERSION = settings.pipeline_version
 
 
 class QueryRequest(BaseModel):
@@ -45,14 +47,17 @@ def get_pipe() -> RetrievalPipeline:
         chunks = load_chunks(settings.canonical_db)
         if not chunks:
             raise HTTPException(503, f"Canonical store empty at {settings.canonical_db}. POST /ingest first.")
+        # Phase 2: staleness is proven by content fingerprint, not row count — a
+        # re-ingest that replaces content at the same row count must rebuild.
+        fp_now = db_fingerprint(settings.canonical_db)
         try:
             idx = HybridIndex.load("data/indexes/hybrid")
-            if len(idx.chunk_ids) != len(chunks):
+            if getattr(idx, "meta_fingerprint", {}) != fp_now:
                 raise ValueError("stale index")
         except Exception:
             idx = HybridIndex()
             idx.build(chunks)
-            idx.save("data/indexes/hybrid")
+            idx.save("data/indexes/hybrid", fingerprint=fp_now)
         _pipe = RetrievalPipeline(idx, chunks)
     return _pipe
 
@@ -82,7 +87,7 @@ def ingest(pdf_dir: str = "pdf", module: str = ""):
     chunks = load_chunks(settings.canonical_db)
     idx = HybridIndex()
     idx.build(chunks)
-    idx.save("data/indexes/hybrid")
+    idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
     _pipe = None
     return result
 
@@ -211,17 +216,29 @@ def api_chat(req: ChatRequest):
     _store.add_message(cid, "user", req.message)
     spec = _provider_spec(req)
     cancel: dict = {}
+    import time as _time
+    _t0 = _time.time()
     events = list(run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior))
     final = next((e for e in reversed(events) if e.get("event") == "complete"), None)
     clarify = next((e for e in events if e.get("event") == "clarify"), None)
     if clarify is not None:
         _store.add_message(cid, "assistant", clarify["question"], {"clarify": clarify.get("missing", [])})
+        _store.log_query(cid, req.message, [], classify_outcome("", clarify=True),
+                         intent=(clarify.get("plan") or {}).get("intent", "") if isinstance(clarify.get("plan"), dict) else "",
+                         pipeline_version=PIPELINE_VERSION, latency_s=_time.time() - _t0)
         return {"conversation_id": cid, "needs_clarification": True, **clarify}
     answer = (final or {}).get("answer", "")
     _store.add_message(cid, "assistant", answer,
                        {"trace": (final or {}).get("trace", {}), "llm": (final or {}).get("llm", ""),
                         "plan": (final or {}).get("plan", {}),
                         "followups": (final or {}).get("followups", [])})
+    _ev_ids = [e.get("source_id", "") for e in events
+               if e.get("event") == "evidence" and e.get("source_id")]
+    _store.log_query(cid, req.message, _ev_ids,
+                     classify_outcome(answer, citation_coverage=(final or {}).get("citation_coverage")),
+                     intent=((final or {}).get("plan") or {}).get("intent", ""),
+                     pipeline_version=PIPELINE_VERSION, latency_s=_time.time() - _t0,
+                     llm=(final or {}).get("llm", ""), confidence=(final or {}).get("confidence"))
     return {"conversation_id": cid, "needs_clarification": False, **(final or {})}
 
 
@@ -623,3 +640,96 @@ def api_sources_reindex(source_id: str):
 def api_tokens_get():
     from src.config.settings import TOKEN_CAPS
     return {"caps": dict(TOKEN_CAPS), "file": "config/generation.yaml"}
+
+
+# ---------------------------------------------------------------------------------------
+# Evaluation screen
+# ---------------------------------------------------------------------------------------
+
+EVAL_DIR = os.environ.get("EVAL_REPORTS_DIR", "reports/evaluation")
+
+
+def _eval_read_json(name: str, default):
+    path = os.path.join(EVAL_DIR, name)
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return default
+
+
+@app.get("/api/evaluation/latest")
+def api_evaluation_latest():
+    """The most recent evaluation run: headline metrics, per-category scores, worst failures."""
+    payload = _eval_read_json("latest.json", None)
+    if not payload:
+        return {"available": False,
+                "hint": "run: python -m src.evaluation.cli run --mode retrieval"}
+    agg = payload.get("aggregate", {})
+    return {
+        "available": True,
+        "label": payload.get("label"),
+        "generated_at": payload.get("generated_at"),
+        "mode": payload.get("mode"),
+        "split": payload.get("split"),
+        "llm_model": payload.get("llm_model"),
+        "golden_sha256": payload.get("golden_sha256"),
+        "coverage": payload.get("coverage"),
+        "metrics_methods": payload.get("metrics_methods"),
+        "aggregate": agg,
+        "worst": payload.get("worst", [])[:20],
+        "split_drift": payload.get("split_drift", []),
+    }
+
+
+@app.get("/api/evaluation/runs")
+def api_evaluation_runs():
+    """Run history for the trend view."""
+    return {"runs": _eval_read_json(os.path.join("runs", "index.json"), [])}
+
+
+@app.get("/api/evaluation/gate")
+def api_evaluation_gate():
+    """The last gate verdict against the agreed thresholds."""
+    thresholds = _eval_read_json(os.path.join("..", "..", "data", "benchmarks",
+                                              "eval_gate.json"), None) or {}
+    return {"gate": _eval_read_json("gate.json", None),
+            "thresholds": {k: v for k, v in thresholds.items() if not k.startswith("_")}}
+
+
+@app.get("/api/evaluation/golden")
+def api_evaluation_golden():
+    """The golden set's coverage mix and the split that is frozen against it."""
+    from src.evaluation.golden import coverage_report, load_golden
+    from src.evaluation.splits import load_split
+    path = os.environ.get("EVAL_GOLDEN_PATH", "data/benchmarks/autosar_golden_v2.jsonl")
+    if not os.path.exists(path):
+        return {"available": False, "path": path}
+    items = load_golden(path)
+    split_path = os.path.join(os.path.dirname(path), "holdout_v2.json")
+    manifest = load_split(split_path) if os.path.exists(split_path) else None
+    return {
+        "available": True,
+        "path": path,
+        "coverage": coverage_report(items),
+        "split": {"counts": (manifest or {}).get("counts"),
+                  "ratio": (manifest or {}).get("holdout_ratio"),
+                  "salt": (manifest or {}).get("salt"),
+                  "golden_sha256": (manifest or {}).get("golden_sha256")},
+    }
+
+
+@app.get("/api/evaluation/review-sample")
+def api_evaluation_review_sample():
+    """The stratified sample that still needs expert review."""
+    import csv
+    path = os.environ.get("EVAL_REVIEW_CSV", "data/benchmarks/expert_review_v2.csv")
+    if not os.path.exists(path):
+        return {"available": False, "path": path}
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    pending = [r for r in rows if not (r.get("review_decision") or "").strip()]
+    return {"available": True, "path": path, "total": len(rows), "pending": len(pending),
+            "rows": rows[:50]}

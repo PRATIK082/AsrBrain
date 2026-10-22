@@ -35,15 +35,23 @@ def build_chunks(document_id: str, source_pdf: str, sha: str, release: str, plat
                 if len(window) < 40:
                     continue
                 cid = _stable_id(document_id, str(pg.index), str(pi), str(w))
+                # Parsers that yield document-level text (docling) set page_unknown;
+                # their page numbers are NULL, never a false page 1.
+                unknown = bool(getattr(pg, "page_unknown", False))
                 atomics.append(Chunk(
                     chunk_id=cid, document_id=document_id, source_pdf=source_pdf,
-                    source_sha256=sha, page_start=pg.index + 1, page_end=pg.index + 1,
-                    pdf_page_index=pg.index, autosar_release=release, platform=platform,
+                    source_sha256=sha,
+                    page_start=None if unknown else pg.index + 1,
+                    page_end=None if unknown else pg.index + 1,
+                    pdf_page_index=None if unknown else pg.index,
+                    autosar_release=release, platform=platform,
                     module=module, document_type=doctype,
                     section_number=sig["headings"][0][0] if sig["headings"] else "",
                     section_title=sig["headings"][0][1] if sig["headings"] else "",
-                    requirement_ids=sig["requirement_ids"][:10], api_names=sig["api_names"][:10],
-                    ecu_parameters=sig["ecu_parameters"][:10],
+                    # No per-chunk truncation: a cited [SWS_...] must be present in the
+                    # chunk's requirement_ids, and a fixed cap silently drops IDs.
+                    requirement_ids=sig["requirement_ids"], api_names=sig["api_names"],
+                    ecu_parameters=sig["ecu_parameters"],
                     text=window, normalized_text=re.sub(r"\s+", " ", window).strip(),
                     chunk_kind="atomic"))
     # context chunks: merge up to CONTEXT_TARGET_WORDS of consecutive atomics on same/adjacent pages
@@ -61,8 +69,10 @@ def build_chunks(document_id: str, source_pdf: str, sha: str, release: str, plat
             pdf_page_index=buf[0].pdf_page_index, autosar_release=release, platform=platform,
             module=module, document_type=doctype, section_number=buf[0].section_number,
             section_title=buf[0].section_title,
-            requirement_ids=sorted({r for c in buf for r in c.requirement_ids})[:20],
-            api_names=sorted({a for c in buf for a in c.api_names})[:20],
+            requirement_ids=sorted({r for c in buf for r in c.requirement_ids}),
+            api_names=sorted({a for c in buf for a in c.api_names}),
+            # Context chunks carry the union of their atomics' ECUC parameters too.
+            ecu_parameters=sorted({e for c in buf for e in c.ecu_parameters}),
             text=text, normalized_text=re.sub(r"\s+", " ", text).strip(), chunk_kind="context"))
         for c in buf:
             c.parent_chunk_id = cid

@@ -1,9 +1,25 @@
 """Ollama + cloud generation with deterministic fallback (works without any LLM)."""
 from __future__ import annotations
+import re
 import httpx
 from ..config.settings import settings, TOKEN_CAPS
 from .prompts import build_prompt
 from .providers import ProviderSpec, complete as _provider_complete
+
+# A draft that does not end with terminal punctuation was cut by the token cap.
+_TERMINAL_RE = re.compile(r"[.!?…;:\"'”’)>\]}]$")
+
+
+def was_cut_off(draft: str) -> bool:
+    """True when a draft ends mid-sentence — i.e. the length cap truncated it."""
+    s = (draft or "").strip()
+    if not s:
+        return False
+    return _TERMINAL_RE.search(s) is None
+
+
+CUT_NOTICE = ("> Answer reached the response length cap and may be incomplete — "
+              "pick Detailed length for the full procedure.")
 
 
 def ollama_available() -> tuple[bool, str]:

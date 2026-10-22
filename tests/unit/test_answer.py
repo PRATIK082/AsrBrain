@@ -22,3 +22,15 @@ def test_generate_ollama_builds_prompt(monkeypatch):
     out = answer._generate_ollama("q?", ev, False)
     assert out["draft"] == "hi [E1]"
     assert "Question: q?" in captured["prompt"] and "Evidence" in captured["prompt"]
+
+
+def test_was_cut_off_flags_truncated_draft():
+    assert answer.was_cut_off('must be part of all \Eth') is True
+    assert answer.was_cut_off('ends mid-word Coupl') is True
+
+
+def test_was_cut_off_accepts_finished_draft():
+    assert answer.was_cut_off('Full sentence here.') is False
+    assert answer.was_cut_off('') is False
+    assert answer.was_cut_off('[E1] f.pdf p.1-2 (R22-11/Classic)') is False
+

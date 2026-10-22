@@ -114,11 +114,11 @@ def _compact_sources(src: str) -> list[str]:
     return lines
 
 from src.config.settings import settings, TOKEN_CAPS
-from src.indexing.hybrid import HybridIndex, load_chunks
+from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
-from src.chat.store import ChatStore
+from src.chat.store import ChatStore, classify_outcome
 from src.ingestion.pipeline import run as run_ingest
 
 st.set_page_config(page_title="AsrBrain — Automotive Intelligence", page_icon="🚗", layout="wide")
@@ -144,15 +144,17 @@ store = ChatStore()
 @st.cache_resource
 def _engine():
     chunks = load_chunks(settings.canonical_db)
+    # Phase 2: staleness is proven by content fingerprint, not row count (same as API).
+    fp_now = db_fingerprint(settings.canonical_db)
     try:
         idx = HybridIndex.load("data/indexes/hybrid")
-        if len(idx.chunk_ids) != len(chunks):
+        if getattr(idx, "meta_fingerprint", {}) != fp_now:
             raise ValueError("stale")
     except Exception:
         idx = HybridIndex()
         idx.build(chunks or [{"chunk_id": "empty", "normalized_text": "",
                               "section_title": "", "requirement_ids": [], "api_names": []}])
-        idx.save("data/indexes/hybrid")
+        idx.save("data/indexes/hybrid", fingerprint=fp_now)
     return RetrievalPipeline(idx, chunks)
 
 
@@ -288,11 +290,13 @@ with st.sidebar:
     st.session_state.depth = {"Eco (4)": TOKEN_CAPS.get("eco", 4),
                               "Balanced (8)": TOKEN_CAPS.get("balanced", 8),
                               "Deep (12)": TOKEN_CAPS.get("deep", 12)}[depth]
-    length = st.radio("Response length", ["Concise", "Standard", "Detailed"], index=0,
+    length = st.radio("Response length", ["Concise", "Standard", "Detailed"], index=1,
                       help=f"Token caps from config/generation.yaml: "
                            f"{TOKEN_CAPS.get('concise', 400)}/"
                            f"{TOKEN_CAPS.get('standard', 600)}/"
-                           f"{TOKEN_CAPS.get('detailed', 1200)}. Edit the file or the Token Config tab to change.")
+                           f"{TOKEN_CAPS.get('detailed', 1200)}. Configuration questions need room — "
+                           f"Concise may cut long procedures short (the answer says so when it happens). "
+                           f"Edit the file or the Token Config tab to change.")
     st.session_state.num_predict = {"Concise": TOKEN_CAPS.get("concise", 400),
                                     "Standard": TOKEN_CAPS.get("standard", 600),
                                     "Detailed": TOKEN_CAPS.get("detailed", 1200)}[length]
@@ -340,7 +344,7 @@ with st.sidebar:
             chunks = load_chunks(settings.canonical_db)
             idx = HybridIndex()
             idx.build(chunks)
-            idx.save("data/indexes/hybrid")
+            idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
             _engine.clear()
             prog.progress(100, text="Done")
             st.success(f"Ingested {up.name} in {int(_t.time()-t0)}s — {res.get('documents', '?')} doc(s) indexed.")
@@ -372,7 +376,7 @@ with st.sidebar:
             chunks = load_chunks(settings.canonical_db)
             idx = HybridIndex()
             idx.build(chunks)
-            idx.save("data/indexes/hybrid")
+            idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
             _engine.clear()
             st.success(f"Indexed {res['files']} file(s) → {res['chunks']} chunks "
                        f"under [{rec['scope_type']}:{rec['scope_name']}]. Ask about them in Chat.")
@@ -463,7 +467,19 @@ with tab_chat:
                     st.toast("Feedback recorded")
                 if c2.button("👎", key=f"neg_{i}"):
                     store.add_feedback(st.session_state.cid, i, "down")
-                    st.toast("Feedback recorded — add the gold answer to data/benchmarks/")
+                    _msgs = conv.get("messages", [])
+                    _q = next((m.get("content", "") for m in reversed(_msgs[:i])
+                               if m.get("role") == "user"), "")
+                    try:
+                        import datetime as _dt
+                        _cand = {"query": _q, "conversation_id": st.session_state.cid,
+                                 "message_idx": i, "rating": "down",
+                                 "created_at": _dt.datetime.now().isoformat(timespec="seconds")}
+                        with open("data/benchmarks/mining_candidates.jsonl", "a", encoding="utf-8") as _fh:
+                            _fh.write(json.dumps(_cand, ensure_ascii=False) + "\n")
+                        st.toast("Feedback recorded — saved as a mining candidate")
+                    except Exception:
+                        st.toast("Feedback recorded — add the gold answer to data/benchmarks/")
             else:
                 if st.button("✏️ Edit & resend", key=f"edit_{i}"):
                     st.session_state.editing[i] = m["content"]
@@ -520,6 +536,7 @@ with tab_chat:
             acc, final_ev = "", None
             ev_cards: list[dict] = []
             clarify_ev = None
+            err_msg = ""
             alive = True
             while alive:
                 try:
@@ -535,6 +552,8 @@ with tab_chat:
                     break
                 kind = ev.get("event")
                 if kind == "status":
+                    if ev.get("stage") == "error":
+                        err_msg = ev.get("message", "")
                     status.update(label=f"{ev.get('stage')}: {ev.get('message')}", state="running")
                 elif kind == "clarify":
                     clarify_ev = ev
@@ -552,8 +571,17 @@ with tab_chat:
                 st.markdown(clarify_ev["question"])
                 store.add_message(st.session_state.cid, "assistant", clarify_ev["question"],
                                   {"clarify": clarify_ev.get("missing", [])})
+                store.log_query(st.session_state.cid, pending, [], classify_outcome("", clarify=True),
+                                latency_s=_time.time() - t0)
                 st.rerun()
             full = (final_ev or {}).get("answer", acc)
+            if not (full or "").strip():
+                # Never persist or render a silent empty answer: say what happened.
+                full = ("⚠️ The answer run produced no output"
+                        + (f": {err_msg}" if err_msg else
+                           " (no answer event arrived — the run may have been stopped).")
+                        + " Please retry; if it repeats, check the Trace tab and report the "
+                          "last status message.")
             body, src = _split_sources(full)
             ph.empty()
             _render_mermaid_blocks(body)  # chat shows the answer; sources collapse below
@@ -580,12 +608,19 @@ with tab_chat:
             _c3.commit()
             _c3.close()
             store.add_message(st.session_state.cid, "assistant", full,
-                              {"trace": (final_ev or {}).get("trace", {}),
-                               "llm": (final_ev or {}).get("llm", ""),
-                               "plan": plan,
-                               "graph": (final_ev or {}).get("graph", []),
-                               "evidence": ev_cards,
-                               "followups": (final_ev or {}).get("followups", [])})
+                               {"trace": (final_ev or {}).get("trace", {}),
+                                "llm": (final_ev or {}).get("llm", ""),
+                                "plan": plan,
+                                "graph": (final_ev or {}).get("graph", []),
+                                "evidence": ev_cards,
+                                "followups": (final_ev or {}).get("followups", [])})
+            store.log_query(st.session_state.cid, pending,
+                            [e.get("source_id", "") for e in ev_cards if e.get("source_id")],
+                            classify_outcome(full, citation_coverage=(final_ev or {}).get("citation_coverage")),
+                            intent=plan.get("intent", ""),
+                            latency_s=_time.time() - t0,
+                            llm=(final_ev or {}).get("llm", ""),
+                            confidence=(final_ev or {}).get("confidence"))
             st.session_state.last = final_ev or {}
             st.session_state.last_evidence = ev_cards
             st.session_state.last_followups = (final_ev or {}).get("followups", [])
@@ -647,7 +682,17 @@ with tab_trace:
         st.caption("Safe operational summary (query plan, filters, counts, coverage, confidence) appears here.")
 with tab_graph:
     last = st.session_state.get("last", {})
-    edges = (last.get("graph", []) or [])
+    # Persistent store first (Phase 4): edges for the last answer's evidence with
+    # snapshot provenance. Falls back to the run's ephemeral edges on old stores.
+    edges = []
+    try:
+        from src.graph.query import evidence_graph as _graph_edges
+        edges = _graph_edges(settings.canonical_db,
+                             st.session_state.get("last_evidence", [])) or []
+    except Exception:
+        edges = []
+    if not edges:
+        edges = (last.get("graph", []) or [])
     if edges:
         for e in edges[:30]:
             flag = " (inferred)" if e.get("is_inferred") else ""
@@ -685,7 +730,7 @@ with tab_src:
                     chunks = load_chunks(settings.canonical_db)
                     idx = HybridIndex()
                     idx.build(chunks)
-                    idx.save("data/indexes/hybrid")
+                    idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
                     _engine.clear()
                 st.success(f"Linked **{sname}** [{rec['scope_type']}:{rec['scope_name']}] — "
                            f"{res['files']} files → {res['chunks']} chunks. Ask about it in Chat.")
@@ -706,7 +751,7 @@ with tab_src:
                     chunks = load_chunks(settings.canonical_db)
                     idx = HybridIndex()
                     idx.build(chunks)
-                    idx.save("data/indexes/hybrid")
+                    idx.save("data/indexes/hybrid", fingerprint=db_fingerprint(settings.canonical_db))
                     _engine.clear()
                 st.success(f"Re-indexed: {res['chunks']} chunks.")
             except Exception as e:

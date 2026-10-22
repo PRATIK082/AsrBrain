@@ -79,7 +79,9 @@ def normalize_page_text(t: str) -> str:
 
 REQ_PATTERNS = [
     re.compile(r"\b((?:SWS|RS|PRS)_[A-Za-z0-9_]+)"),
-    re.compile(r"\[(PRS_[A-Za-z0-9_\-]+)\]"),
+    # Bracket citations come in every requirement family, not just PRS; missing them
+    # here means the cited evidence can never contain the cited identifier.
+    re.compile(r"\[((?:SWS|RS|PRS|SRS|TPS|constr)_[A-Za-z0-9_\-]+)\]"),
 ]
 API_PATTERN = re.compile(r"\b([A-Z][A-Za-z0-9_]*(?:_[A-Z][A-Za-z0-9_]*)+)\b")
 HEADING_PATTERN = re.compile(r"^(\d+(?:\.\d+){0,3})\s+(.{3,120})$", re.M)

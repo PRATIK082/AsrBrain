@@ -1,7 +1,7 @@
 """Index builder entry point."""
 from __future__ import annotations
 import argparse
-from .hybrid import HybridIndex, load_chunks
+from .hybrid import HybridIndex, db_fingerprint, load_chunks
 
 
 def main():
@@ -12,7 +12,8 @@ def main():
     chunks = load_chunks(args.canonical)
     idx = HybridIndex()
     idx.build(chunks)
-    idx.save(args.out)
+    # Phase 2: stamp the content fingerprint so the API can prove freshness.
+    idx.save(args.out, fingerprint=db_fingerprint(args.canonical))
     print(f"indexed {len(chunks)} chunks -> {args.out}")
 
 

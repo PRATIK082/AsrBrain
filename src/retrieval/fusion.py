@@ -10,6 +10,20 @@ DEFAULT_WEIGHTS = {
 }
 
 
+def normalise_scores(scores: dict[str, float]) -> dict[str, float]:
+    """Min-max normalise a score dict to [0, 1].
+
+    Shared by ``weighted_fusion`` and the RRF path in the retrieval pipeline, so that a
+    fused score (raw RRF values sit around 0.02) can be weighed against the overlap and
+    exact-identifier signals on the same scale.
+    """
+    if not scores:
+        return {}
+    lo, hi = min(scores.values()), max(scores.values())
+    rng = (hi - lo) or 1.0
+    return {cid: (v - lo) / rng for cid, v in scores.items()}
+
+
 def rrf(rank_lists: list[list[str]], k: int = 60) -> dict[str, float]:
     scores: dict[str, float] = {}
     for lst in rank_lists:
@@ -21,13 +35,7 @@ def rrf(rank_lists: list[list[str]], k: int = 60) -> dict[str, float]:
 def weighted_fusion(bm25: dict[str, float], dense: dict[str, float], intent: str) -> dict[str, float]:
     wb, wd, _ = DEFAULT_WEIGHTS.get(intent, DEFAULT_WEIGHTS["unknown"])
     # min-max normalise each channel
-    def norm(d):
-        if not d:
-            return {}
-        lo, hi = min(d.values()), max(d.values())
-        rng = (hi - lo) or 1.0
-        return {cid: (v - lo) / rng for cid, v in d.items()}
-    nb, nd = norm(bm25), norm(dense)
+    nb, nd = normalise_scores(bm25), normalise_scores(dense)
     out: dict[str, float] = {}
     for cid in set(nb) | set(nd):
         out[cid] = wb * nb.get(cid, 0.0) + wd * nd.get(cid, 0.0)

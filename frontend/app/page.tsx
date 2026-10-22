@@ -8,8 +8,9 @@ import { useAsrStream } from "../hooks/useAsrStream";
 import { ChatMessage } from "../components/chat/ChatMessage";
 import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
 import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
+import EvaluationView from "../components/eval/EvaluationView";
 
-type Tab = "chat" | "arxml" | "diff" | "code";
+type Tab = "chat" | "arxml" | "diff" | "code" | "evaluation";
 
 function ChatPane() {
   const [input, setInput] = useState("");
@@ -229,14 +230,14 @@ export default function EngineeringPage() {
     <main className="flex h-screen">
       <aside className="w-64 border-r p-4">
         <h1 className="font-bold">AsrBrain</h1>
-        {(["chat", "arxml", "diff", "code"] as Tab[]).map((t) => (
+        {(["chat", "arxml", "diff", "code", "evaluation"] as Tab[]).map((t) => (
           <button key={t} className={`mt-2 w-full rounded border p-2 text-left ${tab === t ? "bg-black text-white" : ""}`} onClick={() => setTab(t)}>
-            {t === "chat" ? "💬 Chat" : t === "arxml" ? "🧩 ARXML Explorer" : t === "diff" ? "🔀 Diff Studio" : "🔍 Code Review"}
+            {t === "chat" ? "💬 Chat" : t === "arxml" ? "🧩 ARXML Explorer" : t === "diff" ? "🔀 Diff Studio" : t === "code" ? "🔍 Code Review" : "📊 Evaluation"}
           </button>
         ))}
         <p className="mt-4 text-xs text-gray-500">Processed locally unless approved policy shows otherwise. No chain-of-thought displayed.</p>
       </aside>
-      {tab === "chat" ? <ChatPane /> : tab === "arxml" ? <ArxmlPane /> : tab === "diff" ? <DiffPane /> : <CodePane />}
+      {tab === "chat" ? <ChatPane /> : tab === "arxml" ? <ArxmlPane /> : tab === "diff" ? <DiffPane /> : tab === "code" ? <CodePane /> : <EvaluationView />}
     </main>
   );
 }

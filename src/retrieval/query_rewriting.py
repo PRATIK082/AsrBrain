@@ -8,7 +8,10 @@ MODULE_EXPANSIONS = {
     "CanDrv": ["CAN Driver"],
     "CanSM": ["CAN State Manager"],
     "Com": ["COM stack", "Com_SendSignal", "signal gateway"],
-    "RTE": ["Run-Time Environment", "runnable", "software component", "VFB"],
+    "RTE": ["Run-Time Environment", "runnable", "software component", "VFB",
+            # document vocabulary: the template names these, users rarely do
+            "SwComponentPrototype", "AtomicSwComponentType", "RunnableEntity",
+            "RTEEvent", "TimingEvent", "PortPrototype", "PortInterface"],
     "Dem": ["Diagnostic Event Manager", "DTC", "diagnostic trouble code", "event memory"],
     "Dcm": ["Diagnostic Communication Manager", "UDS", "diagnostic session"],
     "Det": ["Default Error Tracer", "Det_ReportError"],

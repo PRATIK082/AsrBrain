@@ -1,0 +1,65 @@
+name: evaluation-gate
+
+# A PR that drops any headline metric beyond the agreed tolerance fails.
+# The gate runs on the synthetic fixture corpus, so it needs no AUTOSAR PDF and no LLM.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build the fixture corpus
+        run: python -m src.evaluation.fixture --out data/canonical/fixture.db
+
+      - name: Build the fixture index
+        run: python -m src.indexing.build --canonical data/canonical/fixture.db --out data/indexes/fixture
+
+      - name: Build the fixture golden set and freeze the hold-out split
+        run: >
+          python -m src.evaluation.build
+          --canonical data/canonical/fixture.db
+          --golden data/benchmarks/fixture_golden.jsonl
+          --split data/benchmarks/fixture_holdout.json
+          --review reports/evaluation/fixture_review.csv
+
+      - name: Run the evaluation harness (retrieval mode, no LLM)
+        run: >
+          python -m src.evaluation.cli run
+          --golden data/benchmarks/fixture_golden.jsonl
+          --split data/benchmarks/fixture_holdout.json
+          --canonical data/canonical/fixture.db
+          --index data/indexes/fixture
+          --out reports/evaluation/fixture
+          --mode retrieval
+          --label ci-fixture
+
+      - name: Enforce the metric gate
+        run: >
+          python -m src.evaluation.gate
+          --run reports/evaluation/fixture/latest.json
+          --gate data/benchmarks/eval_gate_ci.json
+          --report reports/evaluation/fixture/gate.json
+
+      - name: Unit and integration tests
+        run: python -m pytest -q
+
+      - name: Upload the evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: reports/evaluation/fixture/
+          retention-days: 14

@@ -31,6 +31,11 @@ export const api = {
     json("/api/code/sarif", { method: "POST", body: JSON.stringify({ sarif }) }),
   diagramAnalyze: (image_path: string, caption = "", page = 0, document_id = "") =>
     json("/api/diagrams/analyze", { method: "POST", body: JSON.stringify({ image_path, caption, page, document_id }) }),
+  evaluationLatest: () => json("/api/evaluation/latest"),
+  evaluationRuns: () => json("/api/evaluation/runs"),
+  evaluationGate: () => json("/api/evaluation/gate"),
+  evaluationGolden: () => json("/api/evaluation/golden"),
+  evaluationReviewSample: () => json("/api/evaluation/review-sample"),
 };
 
 /** SSE reader for POST /api/chat/stream — yields parsed StreamEvents. */

@@ -22,6 +22,11 @@ _TECH_WORDS = {
     "comparison", "diagnostic", "troubleshoot", "sequence", "behavior", "behaviour",
     "return", "error", "message", "communication", "service", "discovery",
     "definition", "purpose", "explain", "version", "release", "module", "between",
+    # component nouns: "sw componet" (0.80) misses the 0.86 fuzzy cutoff against
+    # the multi-word alias "sw component", but "componet"→"component" scores 0.94,
+    # after which the "sw component" alias matches the corrected text. Generic:
+    # any typo of these nouns within the cutoff now self-heals.
+    "component", "components",
     # everyday words users mistype (fuzzy targets for the typo layer)
     "detailed", "details", "property", "properties", "required", "mapping",
     "analysis", "question", "questions", "example", "examples", "element",

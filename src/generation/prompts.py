@@ -41,7 +41,9 @@ def build_prompt(query: str, evidence: list[dict], comparison: bool = False,
                 "## Evidence, ## Sources.")
     elif intent == "configuration":
         task = ("Sections: ## Direct answer, ## Configuration procedure (numbered, cite container/parameter/"
-                "multiplicity/default/range), ## Related APIs/requirements, ## Sources.")
+                "multiplicity/default/range), ## Related APIs/requirements, ## Sources. "
+                "Present template configuration first; model background (class definitions of the "
+                "M2 elements) last, only as grounding for the configuration above.")
     else:
         task = ("Structure: ## Direct answer, ## Technical explanation, "
                 "## Configuration or integration details (if relevant), ## Version notes, ## Sources.")
