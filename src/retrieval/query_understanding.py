@@ -54,6 +54,17 @@ def parse(query: str) -> QueryPlan:
                 if canon not in plan.modules:
                     plan.modules.append(canon)
     plan.api_names = sorted(set(API_RE.findall(qc)))
+    # ECUC configuration parameters are CamelCase without underscores; extract
+    # them from the config-specific phrasings so the exact-id fast path can
+    # promote their chunks.
+    cfg_params = set()
+    for m in re.finditer(r"named\s+([A-Za-z][A-Za-z0-9_]*)", qc):
+        cfg_params.add(m.group(1))
+    for m in re.finditer(r"ECUC parameter ([A-Za-z][A-Za-z0-9_]*)", qc):
+        cfg_params.add(m.group(1))
+    for m in re.finditer(r"How is ([A-Za-z][A-Za-z0-9_]*) configur\w*", qc):
+        cfg_params.add(m.group(1))
+    plan.configuration_parameters = sorted(cfg_params)
     # API prefix implies its owning module (Rte_Read→RTE, Dem_GetStatus→Dem)
     for api in plan.api_names:
         canon = module_for_api(api)

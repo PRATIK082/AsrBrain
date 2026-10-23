@@ -27,7 +27,14 @@ def tokenize_technical(text: str) -> list[str]:
 
 
 class HybridIndex:
-    def __init__(self):
+    def __init__(self, backend: str = "tfidf", model: str = "", encoder=None):
+        """backend=tfidf builds the classic TF-IDF matrix; backend=sbert stores
+        L2-normalised transformer vectors in the same doc_matrix slot, so
+        dense_scores() (cosine) works unchanged. encoder(texts)->array is
+        injectable for tests; None means the real local model (ADR-0002)."""
+        self.backend = backend
+        self.model = model
+        self._encoder = encoder
         self.chunk_ids: list[str] = []
         self.payloads: list[dict] = []
         self.texts: list[str] = []
@@ -40,6 +47,12 @@ class HybridIndex:
         self.chunk_ids = [c["chunk_id"] for c in chunks]
         self.payloads = chunks
         self.texts = [(c.get("section_title", "") + " " + c.get("normalized_text", "")) for c in chunks]
+        if self.backend == "sbert":
+            from .embeddings import DEFAULT_MODEL, encode
+            self.model = self.model or DEFAULT_MODEL
+            self.doc_matrix = encode(self.texts, self.model, encoder=self._encoder)
+            self.vocab, self.idf, self.tokenized = {}, None, []
+            return
         # document frequency over technical tokens
         from collections import Counter
         df: Counter = Counter()
@@ -63,6 +76,9 @@ class HybridIndex:
         self.doc_matrix = mat / np.where(norms == 0, 1, norms)
 
     def embed_query(self, q: str) -> np.ndarray:
+        if self.backend == "sbert":
+            from .embeddings import encode
+            return encode([q], self.model, encoder=self._encoder)[0]
         toks = tokenize_technical(q)
         from collections import Counter
         tf: Counter = Counter(toks)
@@ -126,10 +142,15 @@ class HybridIndex:
 
     def save(self, path: str, fingerprint: dict | None = None):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        np.savez_compressed(path + ".npz", matrix=self.doc_matrix, idf=self.idf)
+        if self.backend == "sbert":
+            np.savez_compressed(path + ".npz", matrix=self.doc_matrix,
+                                idf=np.zeros(1, dtype=np.float32))
+        else:
+            np.savez_compressed(path + ".npz", matrix=self.doc_matrix, idf=self.idf)
         with open(path + ".meta.json", "w") as f:
             json.dump({"chunk_ids": self.chunk_ids, "payloads": self.payloads,
                         "texts": self.texts, "vocab": self.vocab,
+                        "backend": self.backend, "model": self.model,
                         # Phase 2: staleness is proven by content, not by row count.
                         "fingerprint": fingerprint or {}}, f)
 
@@ -141,6 +162,7 @@ class HybridIndex:
         with open(path + ".meta.json") as f:
             m = json.load(f)
         idx.chunk_ids, idx.payloads, idx.texts, idx.vocab = m["chunk_ids"], m["payloads"], m["texts"], m["vocab"]
+        idx.backend, idx.model = m.get("backend", "tfidf"), m.get("model", "")
         idx.meta_fingerprint = m.get("fingerprint", {})
         return idx
 
