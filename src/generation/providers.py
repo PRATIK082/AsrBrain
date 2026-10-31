@@ -19,10 +19,6 @@ class ProviderSpec:
     timeout_s: float = 120.0
 
 
-def _redact(spec: ProviderSpec) -> str:
-    return f"{spec.kind}:{spec.model}@{spec.base_url}"
-
-
 def list_ollama_models(base_url: str = "http://127.0.0.1:11434") -> list[str]:
     try:
         r = httpx.get(f"{base_url}/api/tags", timeout=5.0)

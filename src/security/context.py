@@ -25,26 +25,6 @@ DEFAULT_CONTEXT = SecurityContext(user_id="local-operator", tenant_id="default",
                                   roles=["engineer"], audit_request_id="local")
 
 
-def derive_context(user_id: str, tenant_id: str, roles: list[str] | None = None,
-                   cloud_allowed: bool = False, **kw) -> SecurityContext:
-    """Server-side derivation helper. `cloud_allowed` must come from tenant policy, not request."""
-    return SecurityContext(user_id=user_id, tenant_id=tenant_id,
-                           roles=roles or ["engineer"],
-                           cloud_policy="cloud_allowed" if cloud_allowed else "local_only",
-                           allowed_model_providers=["ollama"] if not cloud_allowed else ["ollama", "openai_compat"],
-                           **kw)
-
-
-def scope_filter(ctx: SecurityContext) -> dict:
-    """Canonical payload filter every retrieval/graph/object-store query must apply."""
-    f: dict = {"tenant_id": ctx.tenant_id}
-    if ctx.project_id:
-        f["project_id"] = ctx.project_id
-    if ctx.workspace_id:
-        f["workspace_id"] = ctx.workspace_id
-    return f
-
-
 def check_access(ctx: SecurityContext, resource_scope: dict) -> tuple[bool, str]:
     """Mandatory server-side check. Returns (allowed, reason). Default-deny on tenant mismatch."""
     if not ctx.tenant_id or not ctx.user_id:
@@ -58,9 +38,3 @@ def check_access(ctx: SecurityContext, resource_scope: dict) -> tuple[bool, str]
         return False, f"vendor scope '{vendor}' not authorized"
     return True, "allowed"
 
-
-def require_access(ctx: SecurityContext, resource_scope: dict) -> None:
-    from fastapi import HTTPException
-    ok, reason = check_access(ctx, resource_scope)
-    if not ok:
-        raise HTTPException(status_code=403, detail=reason)

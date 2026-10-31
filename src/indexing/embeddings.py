@@ -65,8 +65,10 @@ def _ollama_encode(texts: list[str], model: str = OLLAMA_MODEL) -> np.ndarray:
                     dim = len(r1["embeddings"][0])
                 except Exception:
                     bad_items += 1
-    print(f"ollama embed: {len(texts)} texts, {bad_batches} batch retries, "
-          f"{bad_items} zero-vector fallbacks")
+    import logging
+    logging.getLogger(__name__).info(
+        "ollama embed: %d texts, %d batch retries, %d zero-vector fallbacks",
+        len(texts), bad_batches, bad_items)
     return np.asarray([v if v is not None else [0.0] * dim for v in out],
                       dtype=np.float32)
 

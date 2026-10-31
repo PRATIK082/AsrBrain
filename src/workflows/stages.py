@@ -103,7 +103,7 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
                "relevance": c.get("rerank_score", 0.0), "label": f"E{i}"}
     yield {"event": "status", "stage": "answer_drafting", "message": "Drafting cited answer"}
     comparison = plan.get("release_mode") == "comparison"
-    gen = _generate(display_query, evidence, comparison, spec)
+    gen = _generate(display_query, evidence, comparison, spec, intent=plan.get("intent", ""))
     draft = gen["draft"]
     # stream draft tokens (real provider stream when available, else chunked replay)
     if spec is not None:

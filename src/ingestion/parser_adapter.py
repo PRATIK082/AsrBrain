@@ -95,8 +95,4 @@ class SyncParserAdapter:
         return out
 
 
-def get_async_adapter(prefer: str = "auto", document_id: str = "", sha: str = "") -> SyncParserAdapter:
-    from .parsers import get_parser
-    routed = prefer if prefer != "auto" else "auto"
-    inner = get_parser("pymupdf" if routed == "auto" else routed)
-    return SyncParserAdapter(inner, document_id, sha)
+

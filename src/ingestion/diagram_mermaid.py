@@ -42,17 +42,6 @@ def render_page_image(pdf_path: str, page_index: int = 0, dpi: int = 200) -> byt
         return None
 
 
-def page_has_vector_drawings(pdf_path: str, page_index: int = 0) -> bool:
-    """True when the page contains vector drawings/images (diagram candidate)."""
-    try:
-        import fitz
-        doc = fitz.open(pdf_path)
-        page = doc[page_index]
-        return bool(page.get_drawings() or page.get_images(full=True))
-    except Exception:
-        return False
-
-
 def recreate_diagrams_for_pdf(pdf_path: str, pages: list[int] | None = None,
                               dpi: int = 200, caption: str = "",
                               provider: str = "", model: str = "") -> list[dict]:

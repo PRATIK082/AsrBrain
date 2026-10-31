@@ -1,4 +1,4 @@
-from src.retrieval.modalities import requirement_search, api_search, table_search, figure_search
+from src.retrieval.modalities import requirement_search, table_search, figure_search
 from src.config.settings import settings
 
 

@@ -9,10 +9,10 @@ and an ``needs_expert_review`` flag. §9 also requires the corpus mix to be audi
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import random
+from ..utils.hashing import sha256_file
 
 #: Fields every golden item must carry.
 REQUIRED_FIELDS = [
@@ -116,13 +116,7 @@ def write_golden(path: str, items: list[dict]) -> int:
     return len(items)
 
 
-def file_sha256(path: str) -> str:
-    """SHA-256 of a file, used to freeze the golden set and the hold-out split."""
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 16), b""):
-            h.update(block)
-    return h.hexdigest()
+
 
 
 def validate(items: list[dict]) -> list[str]:

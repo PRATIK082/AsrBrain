@@ -8,6 +8,10 @@ def _get(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _load_token_caps() -> dict:
     """User-editable caps from config/generation.yaml; env LLM_NUM_PREDICT wins."""
     caps = {"concise": 400, "standard": 600, "detailed": 1200,
@@ -67,12 +71,12 @@ class Settings:
     # spelling is still honoured as a fallback.
     pipeline_version: str = field(default_factory=lambda: _get(
         "RAG_PIPELINE_VERSION", _get("ASRBRAIN_PIPELINE_VERSION", "v2")))
-    arxml_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_ARXML_ENABLED", "true").lower() == "true")
-    diff_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_DIFF_ENABLED", "true").lower() == "true")
-    code_intel_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_CODE_INTELLIGENCE_ENABLED", "true").lower() == "true")
-    cloud_routing_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_CLOUD_ROUTING_ENABLED", "false").lower() == "true")
-    strict_local_only: bool = field(default_factory=lambda: _get("ASRBRAIN_STRICT_LOCAL_ONLY", "true").lower() == "true")
-    vendor_plugins_enabled: bool = field(default_factory=lambda: _get("ASRBRAIN_VENDOR_PLUGINS_ENABLED", "false").lower() == "true")
+    arxml_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_ARXML_ENABLED", True))
+    diff_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_DIFF_ENABLED", True))
+    code_intel_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_CODE_INTELLIGENCE_ENABLED", True))
+    cloud_routing_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_CLOUD_ROUTING_ENABLED", False))
+    strict_local_only: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_STRICT_LOCAL_ONLY", True))
+    vendor_plugins_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_VENDOR_PLUGINS_ENABLED", False))
 
 
 settings = Settings()

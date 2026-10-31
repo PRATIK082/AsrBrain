@@ -23,7 +23,7 @@ def test_multi_module_template_abstains():
 def test_bsw_marker_across_line_break():
     # Page-normalised text keeps single newlines: the marker and the module name
     # often sit on different lines ("BSW Context\nEthSwt").
-    text = ("Scope " * 500 + "BSW Context\nEthSwt x " * 10 + "BSW Context\nMirror y " * 10)
+    text = ("Scope " * 500 + "BSW Context\nEthZZZ x " * 10 + "BSW Context\nMirror y " * 10)
     assert infer_module(text) == ""
 
 
@@ -33,5 +33,5 @@ def test_single_bsw_context_wins():
 
 
 def test_unmapped_bsw_contexts_abstain():
-    text = "Scope " * 200 + "BSW Context EthSwt x " * 10 + "BSW Context Mirror y " * 10
+    text = "Scope " * 200 + "BSW Context EthZZZ x " * 10 + "BSW Context Mirror y " * 10
     assert infer_module(text) == ""

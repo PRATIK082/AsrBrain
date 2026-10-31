@@ -358,8 +358,8 @@ def run_evaluation(golden_path: str, canonical: str, index_path: str, out_dir: s
         "results": rows,
     }
     if os.path.exists(golden_path):
-        from .golden import file_sha256
-        payload["golden_sha256"] = file_sha256(golden_path)
+        from ..utils.hashing import sha256_file
+        payload["golden_sha256"] = sha256_file(golden_path)
     _write_outputs(payload, out_dir)
     return payload
 

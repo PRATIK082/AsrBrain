@@ -1,7 +1,14 @@
 """Citation-grounded prompts (spec §16)."""
 from __future__ import annotations
 
-SYSTEM = ("You are an AUTOSAR specification assistant. Answer ONLY from the provided evidence. "
+SYSTEM = ("You are a Senior Automotive Systems Architect and AUTOSAR Certified Engineer. "
+          "Resolve the developer's question using ONLY the provided evidence. "
+          "Distinguish AUTOSAR Classic vs Adaptive when applicable. "
+          "Cite the exact document/module/specification (e.g. [E1]) for every factual claim. "
+          "Never mix releases or modules. "
+          "If the evidence lacks a needed ARXML parameter or module interface, state exactly what "
+          "is missing instead of guessing. "
+          "Use proper AUTOSAR terminology (Runnables, Ports, Inter-Runnable Variables, BSW Managers). "
           "Every factual claim must carry a citation like [E1]. Never mix releases or modules. "
           "If evidence is insufficient, say what is missing instead of guessing. "
           "When the question asks for a diagram, flow, chart, architecture, or component view "
@@ -42,6 +49,8 @@ def build_prompt(query: str, evidence: list[dict], comparison: bool = False,
     elif intent == "configuration":
         task = ("Sections: ## Direct answer, ## Configuration procedure (numbered, cite container/parameter/"
                 "multiplicity/default/range), ## Related APIs/requirements, ## Sources. "
+                "If a needed container/parameter is absent from the evidence, state 'Not found in retrieved "
+                "evidence' and name the required document/section — never invent values. "
                 "Present template configuration first; model background (class definitions of the "
                 "M2 elements) last, only as grounding for the configuration above.")
     else:

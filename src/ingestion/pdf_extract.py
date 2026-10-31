@@ -1,26 +1,17 @@
 """Staged PDF ingestion pipeline (spec §4). PyMuPDF preferred, pypdf fallback, OCR flagged not silent."""
 from __future__ import annotations
-import hashlib
 import os
 import re
 from dataclasses import dataclass
 
 from .metadata import detect_release_platform
-
+from ..utils.hashing import sha256_file  # re-exported for backward compat
 
 @dataclass
 class PageText:
     index: int          # 0-based pdf page index
     text: str
     char_count: int
-
-
-def sha256_file(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""):
-            h.update(b)
-    return h.hexdigest()
 
 
 def discover_pdfs(root: str) -> list[str]:
@@ -104,12 +95,3 @@ def extract_signals(text: str) -> dict:
     return {"requirement_ids": sorted(set(flat))[:100], "api_names": apis,
             "headings": headings[:200], "ecu_parameters": ecuc}
 
-
-def quality_report(source_pdf: str, sha: str, pages: list[PageText], signals: dict) -> dict:
-    low = [p.index for p in pages if p.char_count < 200]
-    return {"source_pdf": source_pdf, "sha256": sha, "page_count": len(pages),
-            "pages_with_low_text": low, "pages_requiring_ocr": low,
-            "tables_detected": 0, "requirements_detected": len(signals["requirement_ids"]),
-            "headings_detected": len(signals["headings"]), "duplicate_pages": [],
-            "extraction_warnings": ["table-extraction-stub" ] if True else [],
-            "quality_score": round(1.0 - len(low) / max(1, len(pages)), 4)}

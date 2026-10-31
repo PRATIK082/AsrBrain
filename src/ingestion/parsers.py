@@ -112,15 +112,6 @@ class DoclingParser(BaseParser):
         return [pg]
 
 
-class MinerUParser(BaseParser):
-    name = "mineru-optional"
-
-    def parse(self, path: str) -> list[ParsedPage]:
-        import importlib
-        importlib.import_module("mineru")
-        raise RuntimeError("MinerU installed but CLI routing not configured; use PyMuPDF path")
-
-
 def get_parser(prefer: str = "auto") -> BaseParser:
     if prefer == "docling":
         try:

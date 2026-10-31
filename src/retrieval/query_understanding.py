@@ -14,7 +14,8 @@ TROUBLE_WORDS = {"why", "error", "errors", "fail", "fails", "failure", "e_not_ok
                  "not reaching", "mismatch", "troubleshoot", "troubleshooting"}
 CONFIG_WORDS = {"configure", "configures", "configured", "configuring", "configuration",
                 "configurations", "config", "ecuc", "parameter", "parameters",
-                "container", "containers", "mandatory", "default"}
+                "container", "containers", "mandatory", "default",
+                "switch", "topology", "coupling", "vlan", "uplink"}
 API_WORDS = {"api", "apis", "function", "functions", "return value", "precondition",
              "preconditions", "init", "transmit"}
 

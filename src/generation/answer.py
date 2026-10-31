@@ -69,17 +69,17 @@ def default_spec() -> ProviderSpec:
 
 
 def generate(query: str, evidence: list[dict], comparison: bool = False,
-             spec: ProviderSpec | None = None) -> dict:
+             spec: ProviderSpec | None = None, intent: str = "") -> dict:
     if spec is None:
         # legacy path: local Ollama default (keeps POST /query working unchanged)
         ok, msg = ollama_available()
         if not ok:
             return {"draft": extractive_fallback(query, evidence), "llm": "fallback", "note": msg}
-        return _generate_ollama(query, evidence, comparison)
+        return _generate_ollama(query, evidence, comparison, intent=intent)
     if not evidence:
         return {"draft": extractive_fallback(query, evidence), "llm": "fallback",
                 "note": "no evidence"}
-    prompt = build_prompt(query, evidence, comparison)
+    prompt = build_prompt(query, evidence, comparison, intent=intent)
     draft, note = _provider_complete(prompt, spec)
     if draft:
         return {"draft": draft, "llm": f"{spec.kind}:{spec.model}"}

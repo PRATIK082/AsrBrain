@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from ..utils.hashing import sha256_file
 
 DEFAULT_SALT = "asrbrain-holdout-2026"
 DEFAULT_RATIO = 0.2
@@ -42,7 +43,7 @@ def save_split(path: str, items: list[dict], golden_path: str, ratio: float = DE
         "version": 1,
         "salt": salt,
         "holdout_ratio": ratio,
-        "golden_sha256": _sha256_file(golden_path),
+        "golden_sha256": sha256_file(golden_path),
         "golden_path": golden_path,
         "counts": {"train": len(parts["train"]), "holdout": len(parts["holdout"])},
         "train": parts["train"],
@@ -74,7 +75,7 @@ def apply_split(items: list[dict], manifest: dict) -> tuple[list[dict], list[dic
 def verify_split(items: list[dict], manifest: dict, golden_path: str) -> list[str]:
     """Report drift between the frozen manifest and the golden set on disk."""
     problems: list[str] = []
-    current = _sha256_file(golden_path)
+    current = sha256_file(golden_path)
     frozen = manifest.get("golden_sha256")
     if frozen and current != frozen:
         problems.append(
@@ -86,10 +87,3 @@ def verify_split(items: list[dict], manifest: dict, golden_path: str) -> list[st
         problems.append(f"{len(missing)} hold-out ids are absent from the golden set: {missing[:5]}")
     return problems
 
-
-def _sha256_file(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 16), b""):
-            h.update(block)
-    return h.hexdigest()
