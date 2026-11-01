@@ -49,3 +49,10 @@ frontend/tsconfig.tsbuildinfo
 dev-api.bat
 dev-chat.bat
 dev-asrbrain.bat
+
+# internal / agent-only working documents and local-only assets (never ship)
+docs/MASTER_PROMPT.md
+docs/target-architecture.md
+docs/adr/
+legacy/
+pdf/*.pdf

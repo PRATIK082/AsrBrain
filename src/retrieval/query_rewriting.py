@@ -18,6 +18,12 @@ MODULE_EXPANSIONS = {
     "BSW": ["Basic Software", "BSW scheduler"],
     "MCAL": ["Microcontroller Abstraction Layer"],
     "SOME-IP": ["SOMEIP", "SOME/IP", "service oriented communication"],
+    "Eth": ["Ethernet", "EthIf", "EthSwt", "EthTSyn"],
+    "EthIf": ["Ethernet Interface", "EthIfSwitchPortGroup", "CouplingPort", "CouplingElement",
+              "VlanMembership", "EthernetPhysicalChannel"],
+    "EthSwt": ["Ethernet Switch", "EthSwtPort", "EthSwtNvm", "switch port", "uplink port"],
+    "EthTSyn": ["Ethernet Time Sync", "EthTSynSwitchManagement", "AVB bridge"],
+    "TcpIp": ["TCP/IP", "IpAddrAssignment", "socket"],
 }
 
 

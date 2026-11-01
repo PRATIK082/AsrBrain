@@ -29,6 +29,14 @@ MODULE_ALIASES = {
     "det": "Det", "default error tracer": "Det",
     "bsw": "BSW", "basic software": "BSW",
     "mcal": "MCAL", "microcontroller abstraction": "MCAL",
+    # Ethernet / communication stack
+    "eth": "Eth", "ethernet": "Eth",
+    "ethif": "EthIf", "eth if": "EthIf", "ethernet interface": "EthIf",
+    "ethswt": "EthSwt", "eth switch": "EthSwt", "ethernet switch": "EthSwt", "eth switch port": "EthSwt",
+    "ethtsyn": "EthTSyn", "eth tsyn": "EthTSyn", "ethernet time sync": "EthTSyn",
+    "tcpip": "TcpIp", "tcp ip": "TcpIp", "tcp/ip": "TcpIp",
+    "ethtrcv": "EthTrcv", "eth transceiver": "EthTrcv",
+    "ethctrl": "EthCtrl", "eth controller": "EthCtrl",
 }
 
 # Generic umbrella words that legitimately span several modules. Values are
@@ -39,6 +47,8 @@ MODULE_GROUPS = {
     # user shorthand — without this, "diag DTC ..." gets no module filter
     "diag": ("Dcm", "Dem"),
     "diags": ("Dcm", "Dem"),
+    "ethernet": ("Eth", "EthIf", "EthSwt", "EthTSyn", "TcpIp"),
+    "eth switch": ("EthSwt", "EthIf"),
 }
 
 
@@ -67,19 +77,6 @@ def module_for_api(api_name: str) -> str:
     return canon if canon in known else ""
 
 PLATFORM_WORDS = {"classic": "Classic", "adaptive": "Adaptive", "foundation": "Foundation"}
-
-
-def normalize_release(label: str) -> dict:
-    l = label.strip()
-    if l in CLASSIC_LABELS:
-        fam, maj, minor, patch = CLASSIC_LABELS[l]
-        return {"release_family": fam, "release_label": l, "release_year": None,
-                "platform": "Classic", "major": maj, "minor": minor, "patch": patch}
-    m = re.fullmatch(r"R(\d{2})-11", l)
-    if m:
-        return {"release_family": "Adaptive_R", "release_label": l,
-                "release_year": 2000 + int(m.group(1)), "platform": "Adaptive"}
-    return {"release_family": "unknown", "release_label": l, "platform": "unknown"}
 
 
 def detect_release_platform(text: str, filename: str) -> tuple[str, str, str]:
@@ -111,10 +108,6 @@ def detect_release_platform(text: str, filename: str) -> tuple[str, str, str]:
         release = mc.group(0)
         platform = "Classic"
     return release, platform, doctype
-
-
-def canonical_module(name: str) -> str:
-    return MODULE_ALIASES.get(name.strip().lower(), name.strip())
 
 
 def infer_module(text: str) -> str:

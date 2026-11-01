@@ -19,10 +19,6 @@ class DiffItem(BaseModel):
     confidence: float = 1.0
 
 
-def _norm_api(sig: str) -> str:
-    return " ".join(sig.split())
-
-
 def diff_records(base: list[dict], target: list[dict], domain: str,
                  key: str = "entity_key") -> list[DiffItem]:
     """Generic canonical-key diff. Never fabricates a change from wording alone: values compared exactly."""
@@ -56,17 +52,3 @@ def diff_records(base: list[dict], target: list[dict], domain: str,
                                     migration_action="update call sites and ECUC refs", severity="warning"))
     return out
 
-
-def diff_arxml_topologies(base, target) -> list[DiffItem]:
-    """Structural ARXML diff over SWCs, ports, interfaces, connectors, runnables, ECUC params."""
-    def recs(items: list[dict], ev: str) -> list[dict]:
-        return [{"entity_key": i["qualified_name"] if isinstance(i, dict) else getattr(i, "qualified_name", str(i)),
-                 "normalized": str(i), "evidence_ids": [ev]} for i in items]
-    items: list[DiffItem] = []
-    items += diff_records(recs([c.model_dump() for c in base.components], "base"),
-                          recs([c.model_dump() for c in target.components], "target"), "arxml")
-    items += diff_records(recs([p.model_dump() for p in base.ports], "base"),
-                          recs([p.model_dump() for p in target.ports], "target"), "arxml")
-    items += diff_records(recs([i.model_dump() for i in base.interfaces], "base"),
-                          recs([i.model_dump() for i in target.interfaces], "target"), "arxml")
-    return items

@@ -8,9 +8,7 @@ points at genuinely exists in the corpus.
 
 Generation is deterministic — same corpus, same seed, same set. The generator reads the canonical
 SQLite store directly and never calls an LLM, so the golden set cannot drift because a model
-changed its mind. An optional LLM paraphrasing pass exists for question naturalness
-(:func:`paraphrase_questions`); paraphrased items are flagged ``needs_expert_review`` and their
-gold evidence is unchanged.
+changed its mind. An optional LLM paraphrasing pass was removed during cleanup; gold evidence is unchanged.
 
 Every generated item is flagged ``needs_expert_review=True`` and ``source="generated"`` until a
 domain expert confirms it. Nothing here is presented as expert-approved.
@@ -638,32 +636,3 @@ def _make_gap_item(slice_name: str, corpus: dict, rng: random.Random, qid) -> di
         notes=note,
     )
 
-
-def paraphrase_questions(items: list[dict], provider_spec: dict, limit: int = 0) -> list[dict]:
-    """Rewrite generated questions into more natural wording using the configured provider.
-
-    The gold evidence and gold answer are never touched. Paraphrased items keep
-    ``needs_expert_review=True``. If the provider is unavailable the items are returned
-    unchanged, so the golden set is always usable.
-    """
-    from ..generation.providers import complete
-
-    targets = items if not limit else items[:limit]
-    for item in targets:
-        if item.get("source") != "generated" or item.get("answerable") is False:
-            continue
-        prompt = (
-            "Rewrite this technical question so it reads like something an automotive engineer "
-            "would type. Keep every identifier, release, module and API name EXACTLY as written "
-            "and keep the meaning identical. Reply with the rewritten question only.\n\n"
-            f"Question: {item['question']}"
-        )
-        try:
-            rewritten = complete(prompt, provider_spec).strip()
-        except Exception:
-            continue
-        rewritten = rewritten.strip().strip('"').splitlines()[0].strip()
-        if rewritten and len(rewritten) > 10 and rewritten != item["question"]:
-            item["question"] = rewritten
-            item["notes"] = (item.get("notes", "") + " | paraphrased by LLM").strip(" |")
-    return items

@@ -21,7 +21,7 @@ def test_staged_event_sequence_mocked_llm():
     idx = HybridIndex.load("data/indexes/hybrid")
     pipe = RetrievalPipeline(idx, chunks)
     orig = stages._generate
-    stages._generate = lambda q, e, comp, spec=None: {"draft": "Mock [E1].", "llm": "mock"}
+    stages._generate = lambda q, e, comp, spec=None, intent="": {"draft": "Mock [E1].", "llm": "mock"}
     try:
         evs = list(stages.run_staged(pipe, "What is SOME/IP?", None, {}, {"skip_clarify": True}))
     finally:

@@ -46,16 +46,3 @@ Return: Scope and evidence quality / Side-by-side table / Prioritized migration 
 Base evidence:\n{base_context}\n\nTarget evidence:\n{target_context}\n\nStructured deterministic diff:\n{structured_diff}
 """
 
-
-def render_arxml_prompt(arxml_context: str, coding_profile: str, spec_context: str, user_input: str) -> str:
-    return ARXML_TO_CODE_PROMPT.format(arxml_context=arxml_context, coding_profile=coding_profile,
-                                       spec_context=spec_context, user_input=user_input)
-
-
-def render_migration_prompt(base_version: str, target_version: str, platform: str, module_or_artifact: str,
-                            comparison_domain: str, base_context: str, target_context: str,
-                            structured_diff: str) -> str:
-    return MIGRATION_DIAGNOSTIC_PROMPT.format(
-        base_version=base_version, target_version=target_version, platform=platform,
-        module_or_artifact=module_or_artifact, comparison_domain=comparison_domain,
-        base_context=base_context, target_context=target_context, structured_diff=structured_diff)

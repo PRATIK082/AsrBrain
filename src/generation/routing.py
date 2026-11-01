@@ -66,6 +66,3 @@ def route_task(task: Task, policy: Privacy, ollama_model: str = "",
                 "model": cloud_model or ollama_model, "task": task}
     return {"kind": "ollama", "model": ollama_model, "task": task}
 
-
-def to_messages(prompt: str) -> list[dict]:
-    return [{"role": "system", "content": STRICT_SYSTEM}, {"role": "user", "content": prompt}]

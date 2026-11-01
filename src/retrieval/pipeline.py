@@ -156,8 +156,10 @@ class RetrievalPipeline:
         final = expanded[:top_k_final]
         if self.flags.order_model_last:
             final = order_evidence(final)
+        _max_chars = 3000 if getattr(plan, "intent", "") == "configuration" else 1500
         for c in final:
-            c["compressed"] = compress(c.get("normalized_text", ""), queries[0])
+            c["compressed"] = compress(c.get("normalized_text", ""), queries[0],
+                                       max_chars=_max_chars)
         filter_trace["exact_candidates"] = len(exact_ids)
         return final, filter_trace
 
@@ -180,10 +182,28 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ public
     def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None) -> dict:
-        top_k_final = top_k_final or settings.final_evidence
         plan = plan or self.plan_for(query)
+        top_k_final = top_k_final or settings.final_evidence
+        if getattr(plan, "intent", None) == "configuration":
+            top_k_final = int(top_k_final * 1.5)
+
+        # Optional LLM-assisted refinement (generic, opt-in via flag).
+        _refined_kw_string = ""
+        if getattr(self.flags, "use_llm_refinement", False):
+            try:
+                from .query_refiner import refine as _refine
+                profile = _refine(query)
+                kws = [k for k in (profile.get("keywords") or []) if k and k.lower() not in query.lower()]
+                _refined_kw_string = " ".join(dict.fromkeys(kws)) if kws else ""
+                for m in (profile.get("modules") or []):
+                    if m and m not in (plan.modules or []):
+                        plan.modules.append(m)
+            except Exception:
+                _refined_kw_string = ""
 
         queries = [query]
+        if _refined_kw_string:
+            queries.append(_refined_kw_string)
         if self.flags.use_rewrite:
             rw = rewrite(plan)  # alias/registry expansions, not free text
             norm_q = plan.normalized_query

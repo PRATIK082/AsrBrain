@@ -15,7 +15,7 @@ def answer_query(pipe: RetrievalPipeline, query: str) -> dict:
         ret2 = pipe.retrieve(query + " " + " ".join(plan.get("modules", [])), top_k_final=12)
         if len(ret2["evidence"]) > len(evidence):
             ret, evidence = ret2, ret2["evidence"]
-    gen = generate(query, evidence, comparison)
+    gen = generate(query, evidence, comparison, intent=plan.get("intent", ""))
     verification = verify(gen["draft"], evidence, plan)
     conf = confidence_score(ret["retrieval_score"], evidence, verification, plan)
     if conf["should_abstain"]:

@@ -1,7 +1,5 @@
 """Vector-graph fusion with spec starting weights (spec §10). Additive over fusion.py."""
 from __future__ import annotations
-from .fusion import rrf
-
 # (lexical, dense, graph, modality/table) starting values — tune against benchmark.
 SPEC_WEIGHTS = {
     "api_lookup": (0.60, 0.20, 0.10, 0.10),       # exact lookup
@@ -36,6 +34,3 @@ def fuse(lexical: dict[str, float], dense: dict[str, float],
             + wg * n[2].get(cid, 0.0) + wm * n[3].get(cid, 0.0)
     return out
 
-
-def fuse_rrf(lists: list[list[str]]) -> dict[str, float]:
-    return rrf(lists)

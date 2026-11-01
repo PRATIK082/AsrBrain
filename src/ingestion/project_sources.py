@@ -63,10 +63,6 @@ class ProjectSource:
     note: str = ""
 
 
-def _registry_path(path: str = REGISTRY_PATH) -> str:
-    return path
-
-
 def load_registry(path: str = REGISTRY_PATH) -> list[dict]:
     try:
         with open(path, encoding="utf-8") as f:
@@ -274,15 +270,6 @@ def ingest_source(source_id: str, canonical_db: str = "data/canonical/canonical.
     migrate(conn)  # M2: idempotent, no-op once applied
     snapshot_id = new_run(conn, source_fingerprint=src["local_path"])
     try:
-        conn.execute("""CREATE TABLE IF NOT EXISTS documents(document_id TEXT PRIMARY KEY,
-            source_pdf TEXT, sha256 TEXT, title TEXT, autosar_release TEXT, platform TEXT,
-            module TEXT, document_type TEXT, page_count INT, quality REAL)""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS chunks(chunk_id TEXT PRIMARY KEY,
-            document_id TEXT, source_pdf TEXT, sha256 TEXT, page_start INT, page_end INT,
-            pdf_page_index INT, autosar_release TEXT, platform TEXT, module TEXT,
-            document_type TEXT, section_number TEXT, section_title TEXT,
-            requirement_ids TEXT, api_names TEXT, ecu_parameters TEXT,
-            parent_chunk_id TEXT, chunk_kind TEXT, text TEXT, normalized_text TEXT)""")
         migrate(conn)
         file_fp = hashlib.sha256("|".join(
             sorted(f[0] for f in files)).encode("utf-8", "replace")).hexdigest()[:32]

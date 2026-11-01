@@ -82,6 +82,10 @@ class RetrievalFlags:
     corrective_loop: bool = True
     corrective_min_evidence: int = 3
 
+    # --- LLM-assisted refinement (generic, opt-in) ---
+    use_llm_refinement: bool = False
+    use_multi_hop: bool = False
+
     @classmethod
     def from_env(cls) -> "RetrievalFlags":
         defaults = cls()
@@ -104,6 +108,8 @@ class RetrievalFlags:
             corrective_loop=_env_bool("corrective_loop", defaults.corrective_loop),
             corrective_min_evidence=_env_int("corrective_min_evidence",
                                              defaults.corrective_min_evidence),
+            use_llm_refinement=_env_bool("use_llm_refinement", defaults.use_llm_refinement),
+            use_multi_hop=_env_bool("use_multi_hop", defaults.use_multi_hop),
         )
 
     def with_overrides(self, **kw) -> "RetrievalFlags":
