@@ -11,7 +11,7 @@ import json
 import os
 import sqlite3
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from src.config.settings import settings
 from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
@@ -20,6 +20,7 @@ from src.workflows.router import answer_query
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
 from src.chat.store import ChatStore, classify_outcome
+from src.schema.evidence import normalize_evidence
 from src.ingestion.pipeline import run as run_ingest
 from src.ingestion.migrations import migrate as migrate_canonical
 from src.security.auth import (hash_password, verify_password, create_session,
@@ -590,14 +591,65 @@ def api_docs():
 
 
 @app.get("/api/documents/{doc_id}")
-def api_doc_get(doc_id: str):
-    conn = sqlite3.connect(settings.canonical_db)
-    conn.row_factory = sqlite3.Row
-    r = conn.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
-    conn.close()
-    if not r:
-        raise HTTPException(404, "document not found")
-    return dict(r)
+def api_doc_get(doc_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "document not found")
+        cols = [d[0] for d in conn.execute("SELECT * FROM documents LIMIT 1").description]
+        data = dict(zip(cols, row))
+        uid = _current_user(request)
+        if uid:
+            allowed = _allowed_docs_for(request)
+            if allowed is not None and doc_id not in (allowed or set()):
+                raise HTTPException(403, "access denied")
+        return data
+    finally:
+        conn.close()
+
+
+@app.get("/api/documents/{doc_id}/preview")
+def api_doc_preview(doc_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT source_pdf FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "document not found")
+        source_pdf = row[0] or ""
+        uid = _current_user(request)
+        if uid:
+            allowed = _allowed_docs_for(request)
+            if allowed is not None and doc_id not in (allowed or set()):
+                raise HTTPException(403, "access denied")
+    finally:
+        conn.close()
+    if not source_pdf:
+        raise HTTPException(404, "source file not available")
+    # Resolve safely under repo root or configured pdf dir.
+    root = Path(ROOT)
+    candidate = (root / source_pdf).resolve() if not os.path.isabs(source_pdf) else Path(source_pdf).resolve()
+    if not candidate.exists():
+        # try pdf dir
+        candidate = (root / settings.pdf_dir / os.path.basename(source_pdf)).resolve()
+    if not candidate.exists() or root not in candidate.parents and candidate != root:
+        raise HTTPException(404, "source file not available")
+    media = "application/pdf" if candidate.suffix.lower() == ".pdf" else "application/octet-stream"
+    return FileResponse(str(candidate), media_type=media, filename=candidate.name)
+
+
+@app.get("/api/evidence/{evidence_id}")
+def api_evidence_get(evidence_id: str, request: Request):
+    chunks = load_chunks(settings.canonical_db)
+    chunk = next((c for c in chunks if c.get("chunk_id") == evidence_id), None)
+    if not chunk:
+        raise HTTPException(404, "evidence not found")
+    uid = _current_user(request)
+    if uid:
+        allowed = _allowed_docs_for(request)
+        if allowed is not None and chunk.get("document_id") not in (allowed or set()):
+            raise HTTPException(403, "access denied")
+    return normalize_evidence(chunk)
 
 
 @app.post("/api/documents/{doc_id}/reprocess")
