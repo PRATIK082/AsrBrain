@@ -35,7 +35,12 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     let cancelled = false;
     setSvg(null);
     setError(null);
-    const code = chart.trim().replace(/\\n/g, "<br/>");
+    const code = chart
+      .trim()
+      .replace(/\\n/g, "<br/>")
+      .replace(/(\w+)\[([^"\]\n]+)\]/g, (m, id, label) =>
+        /[(: ]/.test(label) ? `${id}["${label}"]` : m
+      );
     if (!code) {
       setError("Empty diagram.");
       return;

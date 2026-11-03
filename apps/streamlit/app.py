@@ -54,6 +54,13 @@ def _render_mermaid_blocks(body: str) -> None:
         code = m.group(1).strip()
         # Mermaid uses <br/> for line breaks; LLMs often emit \\n which fails to parse.
         code = code.replace("\\n", "<br/>")
+        # Quote labels containing spaces/parens/colons to avoid parser errors.
+        def _quote(m):
+            label = m.group(2)
+            if any(ch in label for ch in "(: "):
+                return f'{m.group(1)}["{label}"]'
+            return m.group(0)
+        code = re.sub(r"(\w+)\[([^\"\]\n]+)\]", _quote, code)
         if not code:
             continue
         uid = f"asr-mmd-{_uuid.uuid4().hex[:8]}"
