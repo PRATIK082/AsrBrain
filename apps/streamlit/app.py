@@ -61,6 +61,15 @@ def _render_mermaid_blocks(body: str) -> None:
                 return f'{m.group(1)}["{label}"]'
             return m.group(0)
         code = re.sub(r"(\w+)\[([^\"\]\n]+)\]", _quote, code)
+        # Auto-close any unclosed node labels (LLMs sometimes truncate).
+        lines = []
+        for line in code.splitlines():
+            opens = line.count("[")
+            closes = line.count("]")
+            if opens > closes:
+                line = line + ("]" * (opens - closes))
+            lines.append(line)
+        code = "\n".join(lines)
         if not code:
             continue
         uid = f"asr-mmd-{_uuid.uuid4().hex[:8]}"

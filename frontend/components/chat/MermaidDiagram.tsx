@@ -40,7 +40,14 @@ export function MermaidDiagram({ chart }: { chart: string }) {
       .replace(/\\n/g, "<br/>")
       .replace(/(\w+)\[([^"\]\n]+)\]/g, (m, id, label) =>
         /[(: ]/.test(label) ? `${id}["${label}"]` : m
-      );
+      )
+      .split("\n")
+      .map((line) => {
+        const opens = (line.match(/\[/g) || []).length;
+        const closes = (line.match(/\]/g) || []).length;
+        return opens > closes ? line + "]".repeat(opens - closes) : line;
+      })
+      .join("\n");
     if (!code) {
       setError("Empty diagram.");
       return;
