@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -94,6 +94,18 @@ MIGRATION_V3 = [
     "CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type)",
     "CREATE INDEX IF NOT EXISTS idx_trace_links_source ON trace_links(source_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_links_target ON trace_links(target_id)",
+]
+
+
+MIGRATION_V5 = [
+    """CREATE TABLE IF NOT EXISTS model_providers(
+        provider_id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT NOT NULL,
+        kind TEXT NOT NULL, task TEXT NOT NULL, base_url TEXT, model TEXT,
+        api_key_env TEXT, timeout_s REAL DEFAULT 120.0,
+        data_transfer_policy TEXT DEFAULT 'local_only', enabled INT DEFAULT 1,
+        created_at TEXT, updated_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_model_providers_workspace ON model_providers(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_model_providers_task ON model_providers(task)",
 ]
 
 
@@ -216,6 +228,12 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 4, "auth, workspaces, collections, audit (Slice 1)")
         version = 4
+    if version < 5 <= target:
+        for stmt in MIGRATION_V5:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 5, "model provider registry (Slice 3)")
+        version = 5
     conn.commit()
     return version
 

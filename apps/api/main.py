@@ -31,6 +31,9 @@ from src.security.workspaces import (create_workspace, add_member, get_membershi
                                     list_collections, add_document_to_collection,
                                     authorized_document_ids, log_audit)
 from src.security.permissions import has_permission
+from src.generation.provider_registry import (create_provider, list_providers, get_provider,
+                                            update_provider, delete_provider, test_connection,
+                                            to_spec)
 from src.evaluation.datasets import write_seed
 
 app = FastAPI(title="AsrBrain API")
@@ -364,6 +367,100 @@ def add_collection_document(collection_id: str, body: CollectionDoc, request: Re
         return {"status": "ok"}
     finally:
         conn.close()
+
+
+class ProviderCreate(BaseModel):
+    workspace_id: str = ""
+    name: str
+    kind: str = "ollama"
+    task: str = "generation"
+    base_url: str = "http://127.0.0.1:11434"
+    model: str = ""
+    api_key_env: str = ""
+    timeout_s: float = 120.0
+    data_transfer_policy: str = "local_only"
+    enabled: bool = True
+
+
+@app.get("/api/providers")
+def list_providers_endpoint(workspace_id: str = "", task: str = "", request: Request = None):
+    conn = _canonical_conn()
+    try:
+        return {"providers": list_providers(conn, workspace_id or None, task or None)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers")
+def create_provider_endpoint(body: ProviderCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        if body.workspace_id:
+            _require_workspace(conn, uid, body.workspace_id, "workspace.manage" if False else "workspace.read")
+        pid = create_provider(conn, body.workspace_id or None, body.name, body.kind, body.task,
+                              body.base_url, body.model, body.api_key_env, body.timeout_s,
+                              body.data_transfer_policy, body.enabled)
+        log_audit(conn, body.workspace_id or None, uid, "provider.create", "provider", pid)
+        return {"provider_id": pid}
+    finally:
+        conn.close()
+
+
+@app.get("/api/providers/{provider_id}")
+def get_provider_endpoint(provider_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        p = get_provider(conn, provider_id)
+        if not p:
+            raise HTTPException(404, "provider not found")
+        return p
+    finally:
+        conn.close()
+
+
+@app.patch("/api/providers/{provider_id}")
+def update_provider_endpoint(provider_id: str, body: dict, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        ok = update_provider(conn, provider_id, **(body or {}))
+        if not ok:
+            raise HTTPException(404, "provider not found")
+        log_audit(conn, None, uid, "provider.update", "provider", provider_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/providers/{provider_id}")
+def delete_provider_endpoint(provider_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        delete_provider(conn, provider_id)
+        log_audit(conn, None, uid, "provider.delete", "provider", provider_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers/{provider_id}/test")
+def test_provider_endpoint(provider_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        p = get_provider(conn, provider_id)
+        if not p:
+            raise HTTPException(404, "provider not found")
+        return test_connection(p)
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers/test")
+def test_provider_inline(body: ProviderCreate):
+    p = body.dict()
+    return test_connection(p)
 
 
 # ---------------- Part D: chat contract ----------------
