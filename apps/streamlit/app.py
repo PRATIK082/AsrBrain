@@ -52,6 +52,8 @@ def _render_mermaid_blocks(body: str) -> None:
                 st.markdown(part)
             continue
         code = m.group(1).strip()
+        # Mermaid uses <br/> for line breaks; LLMs often emit \\n which fails to parse.
+        code = code.replace("\\n", "<br/>")
         if not code:
             continue
         uid = f"asr-mmd-{_uuid.uuid4().hex[:8]}"

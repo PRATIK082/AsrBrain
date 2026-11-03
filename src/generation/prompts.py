@@ -15,7 +15,9 @@ SYSTEM = ("You are a Senior Automotive Systems Architect and AUTOSAR Certified E
           "AND the evidence contains project sources (Type: code/arxml/config) or ARXML topology "
           "summaries, generate the diagram from that evidence as a fenced ```mermaid flowchart "
           "plus a short parts table — each element cited. Only say no diagram is available when "
-          "no project/ARXML evidence is present at all.")
+          "no project/ARXML evidence is present at all. "
+          "Mermaid rules: use <br/> for line breaks (never \\\\n); quote labels containing "
+          "parentheses, colons, or spaces; keep node IDs alphanumeric.")
 
 EVIDENCE_HEADER = ("[Evidence {eid}] Document: {doc} | Release: {rel} | Platform: {plat} | "
                    "Module: {mod} | Type: {dt} | Section: {sec} | Pages: {p0}-{p1} | "
