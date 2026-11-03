@@ -14,6 +14,9 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from src.config.settings import settings
+from src.config.pipeline_config import (create_config, get_active, list_configs,
+                                       activate_config, rollback, validate_config,
+                                       DEFAULT_CONFIG)
 from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.router import answer_query
@@ -461,6 +464,87 @@ def test_provider_endpoint(provider_id: str, request: Request):
 def test_provider_inline(body: ProviderCreate):
     p = body.dict()
     return test_connection(p)
+
+
+class PipelineConfigCreate(BaseModel):
+    config: dict
+    note: str = ""
+    activate: bool = False
+
+
+@app.get("/api/config/pipeline")
+def get_pipeline_config():
+    conn = _canonical_conn()
+    try:
+        active = get_active(conn)
+        if not active:
+            return {"config": DEFAULT_CONFIG, "version": 0, "active": False}
+        return active
+    finally:
+        conn.close()
+
+
+@app.get("/api/config/pipeline/versions")
+def list_pipeline_configs(request: Request):
+    _require_user(request)
+    conn = _canonical_conn()
+    try:
+        return {"versions": list_configs(conn)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline")
+def create_pipeline_config(body: PipelineConfigCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        # admin/owner only
+        # allow if any workspace membership role owner/admin
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        cid = create_config(conn, body.config, created_by=uid, note=body.note, activate=body.activate)
+        log_audit(conn, None, uid, "config.create", "pipeline_config", cid)
+        return {"config_id": cid}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline/{config_id}/activate")
+def activate_pipeline_config(config_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        if not activate_config(conn, config_id):
+            raise HTTPException(404, "config not found")
+        log_audit(conn, None, uid, "config.activate", "pipeline_config", config_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline/rollback")
+def rollback_pipeline_config(request: Request, version: int | None = None):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        cid = rollback(conn, version)
+        if not cid:
+            raise HTTPException(404, "nothing to roll back to")
+        log_audit(conn, None, uid, "config.rollback", "pipeline_config", cid)
+        return {"config_id": cid}
+    finally:
+        conn.close()
 
 
 # ---------------- Part D: chat contract ----------------

@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -94,6 +94,15 @@ MIGRATION_V3 = [
     "CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type)",
     "CREATE INDEX IF NOT EXISTS idx_trace_links_source ON trace_links(source_id)",
     "CREATE INDEX IF NOT EXISTS idx_trace_links_target ON trace_links(target_id)",
+]
+
+
+MIGRATION_V6 = [
+    """CREATE TABLE IF NOT EXISTS pipeline_configs(
+        config_id TEXT PRIMARY KEY, version INT NOT NULL, config_json TEXT NOT NULL,
+        created_by TEXT, created_at TEXT, active INT DEFAULT 0, note TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_version ON pipeline_configs(version)",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_active ON pipeline_configs(active)",
 ]
 
 
@@ -234,6 +243,12 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 5, "model provider registry (Slice 3)")
         version = 5
+    if version < 6 <= target:
+        for stmt in MIGRATION_V6:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 6, "pipeline config versioning (Slice 4)")
+        version = 6
     conn.commit()
     return version
 
