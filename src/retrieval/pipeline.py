@@ -126,9 +126,10 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ one release
     def _retrieve_release(self, release: str, queries: list[str], plan: QueryPlan,
-                          top_k_final: int) -> tuple[list[dict], dict]:
+                          top_k_final: int, allowed_doc_ids: set | None = None) -> tuple[list[dict], dict]:
         pool, filter_trace = apply_filters_ex(self.chunks, plan, release_override=release,
-                                               flags=self.flags)
+                                               flags=self.flags,
+                                               allowed_doc_ids=allowed_doc_ids)
         pool_ids = {c["chunk_id"] for c in pool}
         dense_scores, bm25_scores = self._channel_scores(queries)
         fused = self._fuse(dense_scores, bm25_scores, plan)
@@ -165,7 +166,7 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ corrective
     def _corrective(self, queries: list[str], plan: QueryPlan, evidence: list[dict],
-                    top_k_final: int) -> list[dict]:
+                    top_k_final: int, allowed_doc_ids: set | None = None) -> list[dict]:
         """Retry with the module constraint dropped before giving up (§6.2)."""
         if len(evidence) >= self.flags.corrective_min_evidence:
             return evidence
@@ -173,7 +174,8 @@ class RetrievalPipeline:
         saved = self.flags
         try:
             self.flags = relaxed
-            retry, _ = self._retrieve_release("", queries, plan, top_k_final)
+            retry, _ = self._retrieve_release("", queries, plan, top_k_final,
+                                             allowed_doc_ids=allowed_doc_ids)
         finally:
             self.flags = saved
         if len(retry) > len(evidence):
@@ -181,7 +183,8 @@ class RetrievalPipeline:
         return evidence
 
     # ------------------------------------------------------------------ public
-    def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None) -> dict:
+    def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None,
+                 allowed_doc_ids: set | None = None) -> dict:
         plan = plan or self.plan_for(query)
         top_k_final = top_k_final or settings.final_evidence
         if getattr(plan, "intent", None) == "configuration":
@@ -225,7 +228,8 @@ class RetrievalPipeline:
             merged: list[dict] = []
             seen: set[str] = set()
             for release in plan.releases:
-                rel_evidence, trace = self._retrieve_release(release, queries, plan, top_k_final)
+                rel_evidence, trace = self._retrieve_release(release, queries, plan, top_k_final,
+                                                            allowed_doc_ids=allowed_doc_ids)
                 per_rel[release] = len(rel_evidence)
                 filter_traces.append(trace)
                 for i in range(top_k_final):
@@ -234,11 +238,13 @@ class RetrievalPipeline:
                         merged.append(rel_evidence[i])
             evidence = merged[:top_k_final]
         else:
-            evidence, trace = self._retrieve_release("", queries, plan, top_k_final)
+            evidence, trace = self._retrieve_release("", queries, plan, top_k_final,
+                                                    allowed_doc_ids=allowed_doc_ids)
             filter_traces.append(trace)
 
         if self.flags.corrective_loop:
-            evidence = self._corrective(queries, plan, evidence, top_k_final)
+            evidence = self._corrective(queries, plan, evidence, top_k_final,
+                                       allowed_doc_ids=allowed_doc_ids)
 
         retrieval_score = (float(np.mean([c.get("rerank_score", 0) for c in evidence]))
                            if evidence else 0.0)

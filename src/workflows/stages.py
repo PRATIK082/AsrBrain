@@ -21,7 +21,8 @@ STAGES = ["query_understanding", "retrieval_planning", "text_retrieval", "table_
 
 def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = None,
                cancel: dict | None = None, known_slots: dict | None = None,
-               top_k: int = 0, history: list[dict] | None = None) -> Iterator[dict]:
+               top_k: int = 0, history: list[dict] | None = None,
+               allowed_doc_ids: set | None = None) -> Iterator[dict]:
     """Yield event dicts: status | clarify | evidence | token | complete."""
     from ..retrieval.query_understanding import parse  # noqa: F401 (stage marker)
     from ..retrieval.normalize import correct_query
@@ -81,7 +82,8 @@ def run_staged(pipe: RetrievalPipeline, query: str, spec: ProviderSpec | None = 
            "plan": plan}
     if cancel.get("stop"):
         return
-    ret = pipe.retrieve(query, top_k_final=top_k or 0, plan=plan_obj)
+    ret = pipe.retrieve(query, top_k_final=top_k or 0, plan=plan_obj,
+                        allowed_doc_ids=allowed_doc_ids)
     plan = ret["plan"]
     evidence = ret["evidence"]
     for branch in ("text_retrieval", "table_retrieval", "graph_retrieval", "fusion_rerank",
