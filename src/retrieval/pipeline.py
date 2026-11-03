@@ -184,7 +184,7 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ public
     def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None,
-                 allowed_doc_ids: set | None = None) -> dict:
+                 allowed_doc_ids: set | None = None, multi_hop_active: bool = False) -> dict:
         plan = plan or self.plan_for(query)
         top_k_final = top_k_final or settings.final_evidence
         if getattr(plan, "intent", None) == "configuration":
@@ -203,6 +203,16 @@ class RetrievalPipeline:
                         plan.modules.append(m)
             except Exception:
                 _refined_kw_string = ""
+
+        # Multi-hop decomposition (opt-in): split comparison/multi-module queries into
+        # independent sub-retrievals and merge their evidence.
+        _subqueries: list[str] = [query]
+        if (getattr(self.flags, "use_multi_hop", False) and not multi_hop_active):
+            try:
+                from .multi_hop import decompose_query as _decompose
+                _subqueries = _decompose(query, plan) or [query]
+            except Exception:
+                _subqueries = [query]
 
         queries = [query]
         if _refined_kw_string:
@@ -242,15 +252,45 @@ class RetrievalPipeline:
                                                     allowed_doc_ids=allowed_doc_ids)
             filter_traces.append(trace)
 
+        # Multi-hop merge (opt-in): retrieve additional subqueries and merge unique evidence.
+        if (getattr(self.flags, "use_multi_hop", False) and not multi_hop_active
+                and len(_subqueries) > 1):
+            seen_ids = {c.get("chunk_id") for c in (evidence or [])}
+            merged = list(evidence or [])
+            for sq in _subqueries[1:]:
+                try:
+                    sub = self.retrieve(sq, top_k_final=top_k_final, plan=None,
+                                       allowed_doc_ids=allowed_doc_ids, multi_hop_active=True)
+                    for c in (sub.get("evidence") or []):
+                        if c.get("chunk_id") not in seen_ids:
+                            seen_ids.add(c.get("chunk_id"))
+                            merged.append(c)
+                except Exception:
+                    continue
+            evidence = merged[:top_k_final]
+
         if self.flags.corrective_loop:
             evidence = self._corrective(queries, plan, evidence, top_k_final,
                                        allowed_doc_ids=allowed_doc_ids)
 
         retrieval_score = (float(np.mean([c.get("rerank_score", 0) for c in evidence]))
                            if evidence else 0.0)
+        try:
+            from .multi_hop import detect_conflicts as _dc
+            _conflicts = _dc(evidence)
+        except Exception:
+            _conflicts = []
+        try:
+            from ..graph.query import evidence_graph as _eg
+            from ..config.settings import settings as _gs
+            _graph = _eg(_gs.canonical_db, evidence)
+        except Exception:
+            _graph = []
         return {"plan": plan.model_dump(), "rewrites": getattr(plan, "corrections", []),
                 "evidence": evidence, "per_release": per_rel,
                 "retrieval_score": round(retrieval_score, 4),
                 "filter_trace": filter_traces,
                 "flags": self.flags.as_dict(),
-                "query_variants": queries}
+                "query_variants": queries,
+                "conflicts": _conflicts,
+                "graph": _graph}
