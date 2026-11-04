@@ -16,6 +16,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           fontFamily: "Inter, SF Pro Text, system-ui, sans-serif",
         }}
       >
+        <style>{`
+          :focus-visible { outline: 2px solid #00F5FF; outline-offset: 2px; }
+          @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+          }
+        `}</style>
         {children}
       </body>
     </html>

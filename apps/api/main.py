@@ -220,6 +220,24 @@ async def admin_restore(request: Request, file: UploadFile = File(...)):
     return {"restored": True, "by": user}
 
 
+@app.post("/api/admin/purge")
+def admin_purge(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    if body.get("confirm") != "DELETE ALL DATA":
+        raise HTTPException(400, "confirm must be 'DELETE ALL DATA'")
+    conn = _canonical_conn()
+    try:
+        for t in ("chunks", "documents", "tables", "figures"):
+            conn.execute(f"DELETE FROM {t}")
+        conn.commit()
+        log_audit(conn, None, user, "purge", "system", "all", {"confirmed": True})
+    finally:
+        conn.close()
+    return {"purged": True, "by": user}
+
+
 @app.post("/query")
 def query(req: QueryRequest):
     q = req.query
@@ -1495,6 +1513,38 @@ def list_safety_goals(request: Request, asil: str = ""):
     finally:
         conn.close()
     return {"safety_goals": rows, "count": len(rows)}
+
+
+@app.post("/api/auth/sso/login")
+def auth_sso_login(body: dict, request: Request, response: Response):
+    secret = os.environ.get("ASRBRAIN_SSO_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "SSO not configured (set ASRBRAIN_SSO_SECRET)")
+    token = body.get("token", "")
+    if not token:
+        raise HTTPException(400, "token required")
+    try:
+        import jwt
+        claims = jwt.decode(token, secret, algorithms=["HS256"])
+    except Exception as exc:
+        raise HTTPException(401, f"invalid SSO token: {exc}")
+    email = claims.get("email") or claims.get("sub")
+    if not email:
+        raise HTTPException(400, "token missing email/sub")
+    display_name = claims.get("name") or str(email).split("@")[0]
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT user_id FROM users WHERE email=?", (str(email).lower(),)).fetchone()
+        if row:
+            user_id = row[0]
+        else:
+            user_id = create_user(conn, str(email), os.urandom(16).hex(), display_name=display_name)
+        token_val = create_session(conn, user_id, user_agent=request.headers.get("user-agent", ""),
+                                  ip=request.client.host if request.client else "")
+    finally:
+        conn.close()
+    response.set_cookie("asrbrain_session", token_val, httponly=True, samesite="lax")
+    return {"user_id": user_id, "email": email}
 
 
 @app.get("/api/model-usage")
