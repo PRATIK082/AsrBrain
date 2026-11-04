@@ -1,0 +1,1 @@
+"""System self-context and capability reporting."""

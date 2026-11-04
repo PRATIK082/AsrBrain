@@ -24,6 +24,7 @@ from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
 from src.chat.store import ChatStore, classify_outcome
 from src.schema.evidence import normalize_evidence
+from src.system.context import build_self_context
 from src.ingestion.pipeline import run as run_ingest
 from src.ingestion.migrations import migrate as migrate_canonical
 from src.security.auth import (hash_password, verify_password, create_session,
@@ -104,6 +105,18 @@ def get_pipe() -> RetrievalPipeline:
 def health():
     return {"status": "ok", "llm": settings.llm_model, "backend": settings.embedding_backend,
             "pipeline": PIPELINE_VERSION}
+
+
+@app.get("/api/context")
+def self_context():
+    """Machine-readable description of this instance (profile, capabilities, data, health)."""
+    return build_self_context()
+
+
+@app.get("/api/features")
+def feature_catalog():
+    """List discoverable features and their availability on this instance."""
+    return {"features": build_self_context()["features"]}
 
 
 @app.post("/query")
