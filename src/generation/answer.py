@@ -1,7 +1,10 @@
 """Ollama + cloud generation with deterministic fallback (works without any LLM)."""
 from __future__ import annotations
 import re
+import time
 import httpx
+import sqlite3
+from pathlib import Path
 from ..config.settings import settings, TOKEN_CAPS
 from .prompts import build_prompt
 from .providers import ProviderSpec, complete as _provider_complete
@@ -75,21 +78,59 @@ def default_spec() -> ProviderSpec:
                         timeout_s=settings.ollama_timeout_s)
 
 
+def _record_usage(model: str, kind: str, start: float, prompt_chars: int) -> None:
+    try:
+        import uuid, sqlite3, time
+        from datetime import datetime, timezone
+        conn = sqlite3.connect(settings.canonical_db)
+        conn.execute("INSERT INTO model_usage(usage_id,model,kind,latency_ms,prompt_chars,created_at) VALUES (?,?,?,?,?,?)",
+                     ("mu-" + uuid.uuid4().hex[:12], model, kind,
+                      round((time.time() - start) * 1000, 1), prompt_chars,
+                      datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _record_usage(model: str, kind: str, start: float, prompt_chars: int) -> None:
+    try:
+        import uuid, sqlite3, time
+        from datetime import datetime, timezone
+        conn = sqlite3.connect(settings.canonical_db)
+        conn.execute("INSERT INTO model_usage(usage_id,model,kind,latency_ms,prompt_chars,created_at) VALUES (?,?,?,?,?,?)",
+                     ("mu-" + uuid.uuid4().hex[:12], model, kind,
+                      round((time.time() - start) * 1000, 1), prompt_chars,
+                      datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def generate(query: str, evidence: list[dict], comparison: bool = False,
              spec: ProviderSpec | None = None, intent: str = "") -> dict:
+    import time
+    start = time.time()
     if spec is None:
         # legacy path: local Ollama default (keeps POST /query working unchanged)
         ok, msg = ollama_available()
         if not ok:
+            _record_usage("fallback", "ollama", start, len(query))
             return {"draft": extractive_fallback(query, evidence, note=msg), "llm": "fallback", "note": msg}
-        return _generate_ollama(query, evidence, comparison, intent=intent)
+        out = _generate_ollama(query, evidence, comparison, intent=intent)
+        _record_usage(out.get("llm", "ollama"), "ollama", start, len(query))
+        return out
     if not evidence:
+        _record_usage("fallback", spec.kind, start, len(query))
         return {"draft": extractive_fallback(query, evidence, note="no evidence"), "llm": "fallback",
                 "note": "no evidence"}
     prompt = build_prompt(query, evidence, comparison, intent=intent)
     draft, note = _provider_complete(prompt, spec)
     if draft:
+        _record_usage(f"{spec.kind}:{spec.model}", spec.kind, start, len(prompt))
         return {"draft": draft, "llm": f"{spec.kind}:{spec.model}"}
+    _record_usage("fallback", spec.kind, start, len(prompt))
     return {"draft": extractive_fallback(query, evidence, note=note), "llm": "fallback", "note": note}
 
 

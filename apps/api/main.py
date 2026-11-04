@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 import time
 import uuid
 import logging
@@ -1359,3 +1360,194 @@ def api_evaluation_review_sample():
     pending = [r for r in rows if not (r.get("review_decision") or "").strip()]
     return {"available": True, "path": path, "total": len(rows), "pending": len(pending),
             "rows": rows[:50]}
+
+
+# ---------------- Test results, defects, release delta, config diff (P2) ----------------
+class TestResultIngest(BaseModel):
+    run_name: str = "manual"
+    results: list[dict]
+
+
+@app.post("/api/test-results")
+def ingest_test_results(body: TestResultIngest, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        run_id = "tr-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO test_runs(run_id,name,created_by,created_at) VALUES (?,?,?,?)",
+                     (run_id, body.run_name, user, datetime.now(timezone.utc).isoformat()))
+        for r in body.results:
+            conn.execute(
+                "INSERT INTO test_results(result_id,run_id,test_case_id,requirement_id,module,status,message,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                ("tres-" + uuid.uuid4().hex[:12], run_id, r.get("test_case_id"), r.get("requirement_id"),
+                 r.get("module"), str(r.get("status", "unknown")), r.get("message"), datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "ingest_test_results", "test_run", run_id, {"count": len(body.results)})
+    finally:
+        conn.close()
+    return {"run_id": run_id, "ingested": len(body.results)}
+
+
+@app.get("/api/test-results")
+def list_test_results(request: Request, status: str = "", requirement_id: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT result_id,run_id,test_case_id,requirement_id,module,status,message,created_at FROM test_results WHERE 1=1"
+        args = []
+        if status:
+            q += " AND status=?"; args.append(status)
+        if requirement_id:
+            q += " AND requirement_id=?"; args.append(requirement_id)
+        rows = [dict(zip(["result_id","run_id","test_case_id","requirement_id","module","status","message","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"results": rows, "count": len(rows)}
+
+
+@app.get("/api/test-results/clusters")
+def cluster_failures(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute("SELECT status,message,COUNT(*) FROM test_results WHERE status!='passed' GROUP BY status,message").fetchall()
+        clusters = [{"status": r[0], "message": r[1], "count": r[2]} for r in rows]
+    finally:
+        conn.close()
+    return {"clusters": clusters}
+
+
+@app.post("/api/defects")
+def create_defect(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        did = "def-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO defects(defect_id,title,requirement_id,severity,status,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
+                     (did, body.get("title", "untitled"), body.get("requirement_id"), body.get("severity", "medium"),
+                      "open", user, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "create_defect", "defect", did)
+    finally:
+        conn.close()
+    return {"defect_id": did}
+
+
+@app.get("/api/defects")
+def list_defects(request: Request, status: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT defect_id,title,requirement_id,severity,status,created_by,created_at FROM defects"
+        args = []
+        if status:
+            q += " WHERE status=?"; args.append(status)
+        rows = [dict(zip(["defect_id","title","requirement_id","severity","status","created_by","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"defects": rows, "count": len(rows)}
+
+
+@app.post("/api/safety-goals")
+def create_safety_goal(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        gid = "sg-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO safety_goals(goal_id,asil,description,requirement_id,created_by,created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, body.get("asil", "QM"), body.get("description", ""), body.get("requirement_id"),
+                      user, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "create_safety_goal", "safety_goal", gid)
+    finally:
+        conn.close()
+    return {"goal_id": gid}
+
+
+@app.get("/api/safety-goals")
+def list_safety_goals(request: Request, asil: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT goal_id,asil,description,requirement_id,created_by,created_at FROM safety_goals"
+        args = []
+        if asil:
+            q += " WHERE asil=?"; args.append(asil)
+        rows = [dict(zip(["goal_id","asil","description","requirement_id","created_by","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"safety_goals": rows, "count": len(rows)}
+
+
+@app.get("/api/model-usage")
+def model_usage(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        rows = [dict(zip(["usage_id","model","kind","latency_ms","prompt_chars","created_at"], r))
+                for r in conn.execute("SELECT usage_id,model,kind,latency_ms,prompt_chars,created_at FROM model_usage ORDER BY created_at DESC LIMIT 100").fetchall()]
+    finally:
+        conn.close()
+    return {"usage": rows, "count": len(rows)}
+
+
+@app.get("/api/releases/delta")
+def release_delta(base: str, target: str):
+    conn = _canonical_conn()
+    try:
+        base_chunks = conn.execute("SELECT chunk_id,requirement_ids FROM chunks WHERE autosar_release=?", (base,)).fetchall()
+        target_chunks = conn.execute("SELECT chunk_id,requirement_ids FROM chunks WHERE autosar_release=?", (target,)).fetchall()
+        base_ids = {r[0] for r in base_chunks}
+        target_ids = {r[0] for r in target_chunks}
+        base_reqs = {rid for r in base_chunks for rid in (r[1] or "").split(",") if rid}
+        target_reqs = {rid for r in target_chunks for rid in (r[1] or "").split(",") if rid}
+    finally:
+        conn.close()
+    return {
+        "base": base, "target": target,
+        "base_chunks": len(base_ids), "target_chunks": len(target_ids),
+        "added_chunks": len(target_ids - base_ids), "removed_chunks": len(base_ids - target_ids),
+        "added_requirements": sorted(target_reqs - base_reqs)[:50],
+        "removed_requirements": sorted(base_reqs - target_reqs)[:50],
+    }
+
+
+@app.get("/api/config/pipeline/diff")
+def config_diff(from_version: int, to_version: int):
+    conn = _canonical_conn()
+    try:
+        from src.config.pipeline_config import list_configs
+        configs = list_configs(conn)
+    finally:
+        conn.close()
+    a = next((c for c in configs if c.get("version") == from_version), None)
+    b = next((c for c in configs if c.get("version") == to_version), None)
+    if not a or not b:
+        raise HTTPException(404, "config version not found")
+    import json as _json
+    try:
+        from src.diff.engine import diff_records
+        diff = diff_records([a], [b])
+    except Exception:
+        diff = {"from": a.get("config_json"), "to": b.get("config_json")}
+    return {"from_version": from_version, "to_version": to_version, "diff": diff}
