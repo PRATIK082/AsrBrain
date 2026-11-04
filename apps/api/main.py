@@ -187,6 +187,38 @@ def admin_backup(request: Request):
     return {"backup_path": str(out), "created_by": user}
 
 
+@app.post("/api/admin/restore")
+async def admin_restore(request: Request, file: UploadFile = File(...)):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    import zipfile
+    import tempfile
+    from pathlib import Path
+    import shutil
+    content = await file.read()
+    tmp = Path(tempfile.mkdtemp())
+    zip_path = tmp / "restore.zip"
+    zip_path.write_bytes(content)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp / "extracted")
+    except Exception as exc:
+        raise HTTPException(400, f"invalid zip: {exc}")
+    extracted = tmp / "extracted"
+    # Safety: only known db files
+    for name in ("canonical.db", "chat.db"):
+        src = extracted / name
+        if src.exists():
+            dst = Path("data/canonical") / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                shutil.copy2(dst, dst.with_suffix(dst.suffix + ".pre-restore"))
+            shutil.copy2(src, dst)
+    log_audit(_canonical_conn(), None, user, "restore", "system", file.filename)
+    return {"restored": True, "by": user}
+
+
 @app.post("/query")
 def query(req: QueryRequest):
     q = req.query

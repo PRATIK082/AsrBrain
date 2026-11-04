@@ -41,12 +41,12 @@ export function OnboardingWizard() {
       )}
       <div className="mt-3 flex gap-2">
         {step > 1 && (
-          <button className="rounded border border-[#1F2937] px-2 py-1" onClick={() => setStep((s) => (s - 1) as Step)}>
+          <button aria-label="Previous onboarding step" className="rounded border border-[#1F2937] px-2 py-1 focus:outline focus:outline-2 focus:outline-[#00F5FF]" onClick={() => setStep((s) => (s - 1) as Step)}>
             Back
           </button>
         )}
         {step < 3 && (
-          <button className="rounded border border-[#00F5FF] px-2 py-1 text-[#00F5FF]" onClick={() => setStep((s) => (s + 1) as Step)}>
+          <button aria-label="Next onboarding step" className="rounded border border-[#00F5FF] px-2 py-1 text-[#00F5FF] focus:outline focus:outline-2 focus:outline-[#00F5FF]" onClick={() => setStep((s) => (s + 1) as Step)}>
             Next
           </button>
         )}
