@@ -9,6 +9,9 @@ pypdf>=4.0
 httpx>=0.27
 qdrant-client>=1.9
 
+# Auth (Slice 1)
+argon2-cffi>=23.1.0     # Argon2id password hashing
+
 # Optional — enabled when installed
 pymupdf>=1.24          # layout-aware extraction + PDF page-image rendering for diagrams
 pillow>=10.0           # image byte handling for diagram snapshots

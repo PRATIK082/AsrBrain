@@ -8,7 +8,8 @@ import uuid
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, title TEXT, created_at REAL, updated_at REAL,
-  slots_json TEXT DEFAULT '{}', archived INT DEFAULT 0);
+  slots_json TEXT DEFAULT '{}', archived INT DEFAULT 0,
+  owner_user_id TEXT, workspace_id TEXT, status TEXT DEFAULT 'active', archived_at REAL);
 CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT,
   created_at REAL, meta_json TEXT DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS feedback(id TEXT PRIMARY KEY, conversation_id TEXT, message_idx INT,
@@ -17,6 +18,8 @@ CREATE TABLE IF NOT EXISTS query_log(id TEXT PRIMARY KEY, conversation_id TEXT, 
   pipeline_version TEXT DEFAULT '', intent TEXT DEFAULT '', outcome TEXT DEFAULT '',
   evidence_ids_json TEXT DEFAULT '[]', latency_s REAL DEFAULT 0.0, llm TEXT DEFAULT '',
   confidence REAL, created_at REAL);
+CREATE TABLE IF NOT EXISTS conversation_shares(id TEXT PRIMARY KEY, conversation_id TEXT, token_hash TEXT,
+  permission TEXT DEFAULT 'read', expires_at REAL, revoked_at REAL, created_by TEXT, created_at REAL);
 """
 
 # Answer-outcome vocabulary for the query flywheel (Phase 4). Kept in sync with
@@ -42,6 +45,17 @@ def _conn(path: str) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     c = sqlite3.connect(path)
     c.executescript(SCHEMA)
+    # additive migration for pre-Slice-1 databases
+    cols = {r[1] for r in c.execute("PRAGMA table_info(conversations)").fetchall()}
+    for col, ddl in (
+        ("owner_user_id", "ALTER TABLE conversations ADD COLUMN owner_user_id TEXT"),
+        ("workspace_id", "ALTER TABLE conversations ADD COLUMN workspace_id TEXT"),
+        ("status", "ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'"),
+        ("archived_at", "ALTER TABLE conversations ADD COLUMN archived_at REAL"),
+    ):
+        if col not in cols:
+            c.execute(ddl)
+    c.commit()
     return c
 
 
@@ -49,14 +63,19 @@ class ChatStore:
     def __init__(self, path: str = "data/canonical/chat.db"):
         self.path = path
 
-    def create(self, title: str = "New conversation") -> dict:
+    def create(self, title: str = "New conversation", owner_user_id: str | None = None,
+               workspace_id: str | None = None) -> dict:
         cid = "conv-" + uuid.uuid4().hex[:10]
         now = time.time()
         c = _conn(self.path)
-        c.execute("INSERT INTO conversations VALUES (?,?,?,?,?,0)", (cid, title, now, now, "{}"))
+        c.execute(
+            "INSERT INTO conversations(id,title,created_at,updated_at,slots_json,archived,"
+            "owner_user_id,workspace_id,status) VALUES (?,?,?,?,?,?,?,?,'active')",
+            (cid, title, now, now, "{}", 0, owner_user_id, workspace_id))
         c.commit()
         c.close()
-        return {"id": cid, "title": title}
+        return {"id": cid, "title": title, "owner_user_id": owner_user_id,
+                "workspace_id": workspace_id}
 
     def list(self, include_archived: bool = False) -> list[dict]:
         c = _conn(self.path)
@@ -111,6 +130,53 @@ class ChatStore:
             c.execute("UPDATE conversations SET title = ? WHERE id = ?", (content[:60], cid))
         c.commit()
         c.close()
+
+    def create_share(self, cid: str, created_by: str, permission: str = "read",
+                     expires_at: float | None = None) -> str:
+        import secrets
+        token = secrets.token_urlsafe(32)
+        token_hash = __import__("hashlib").sha256(token.encode()).hexdigest()
+        c = _conn(self.path)
+        c.execute("INSERT INTO conversation_shares VALUES (?,?,?,?,?,?,?,?)",
+                  ("share-" + secrets.token_hex(8), cid, token_hash, permission,
+                   expires_at, None, created_by, time.time()))
+        c.commit()
+        c.close()
+        return token
+
+    def resolve_share(self, token: str) -> dict | None:
+        import hashlib
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        c = _conn(self.path)
+        row = c.execute(
+            "SELECT conversation_id, permission, expires_at, revoked_at FROM conversation_shares "
+            "WHERE token_hash = ?", (token_hash,)).fetchone()
+        c.close()
+        if not row:
+            return None
+        cid, permission, expires_at, revoked_at = row
+        if revoked_at:
+            return None
+        if expires_at and time.time() > expires_at:
+            return None
+        return {"conversation_id": cid, "permission": permission}
+
+    def revoke_share(self, share_id: str) -> bool:
+        c = _conn(self.path)
+        c.execute("UPDATE conversation_shares SET revoked_at = ? WHERE id = ?", (time.time(), share_id))
+        c.commit()
+        n = c.total_changes
+        c.close()
+        return n > 0
+
+    def list_shares(self, cid: str) -> list[dict]:
+        c = _conn(self.path)
+        rows = c.execute(
+            "SELECT id, permission, expires_at, revoked_at, created_at FROM conversation_shares "
+            "WHERE conversation_id = ?", (cid,)).fetchall()
+        c.close()
+        return [{"id": r[0], "permission": r[1], "expires_at": r[2], "revoked_at": r[3],
+                 "created_at": r[4]} for r in rows]
 
     def get_slots(self, cid: str) -> dict:
         c = _conn(self.path)

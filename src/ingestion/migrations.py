@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 3
+CURRENT_VERSION = 6
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -97,6 +97,75 @@ MIGRATION_V3 = [
 ]
 
 
+MIGRATION_V6 = [
+    """CREATE TABLE IF NOT EXISTS pipeline_configs(
+        config_id TEXT PRIMARY KEY, version INT NOT NULL, config_json TEXT NOT NULL,
+        created_by TEXT, created_at TEXT, active INT DEFAULT 0, note TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_version ON pipeline_configs(version)",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_active ON pipeline_configs(active)",
+]
+
+
+MIGRATION_V5 = [
+    """CREATE TABLE IF NOT EXISTS model_providers(
+        provider_id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT NOT NULL,
+        kind TEXT NOT NULL, task TEXT NOT NULL, base_url TEXT, model TEXT,
+        api_key_env TEXT, timeout_s REAL DEFAULT 120.0,
+        data_transfer_policy TEXT DEFAULT 'local_only', enabled INT DEFAULT 1,
+        created_at TEXT, updated_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_model_providers_workspace ON model_providers(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_model_providers_task ON model_providers(task)",
+]
+
+
+MIGRATION_V4 = [
+    # Slice 1: authentication, authorization, and collection scoping.
+    """CREATE TABLE IF NOT EXISTS users(
+        user_id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, display_name TEXT,
+        password_hash TEXT NOT NULL, status TEXT DEFAULT 'active',
+        created_at TEXT, last_login_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS workspaces(
+        workspace_id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE,
+        created_by TEXT, created_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS workspace_memberships(
+        user_id TEXT NOT NULL, workspace_id TEXT NOT NULL, role TEXT NOT NULL,
+        created_at TEXT, created_by TEXT,
+        PRIMARY KEY (user_id, workspace_id),
+        FOREIGN KEY (user_id) REFERENCES users(user_id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id))""",
+    """CREATE TABLE IF NOT EXISTS collections(
+        collection_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+        description TEXT, visibility TEXT DEFAULT 'private', owner_id TEXT,
+        created_at TEXT, updated_at TEXT,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+        FOREIGN KEY (owner_id) REFERENCES users(user_id))""",
+    """CREATE TABLE IF NOT EXISTS collection_documents(
+        collection_id TEXT NOT NULL, document_id TEXT NOT NULL, added_by TEXT,
+        added_at TEXT,
+        PRIMARY KEY (collection_id, document_id),
+        FOREIGN KEY (collection_id) REFERENCES collections(collection_id))""",
+    """CREATE TABLE IF NOT EXISTS user_sessions(
+        session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL,
+        created_at TEXT, expires_at TEXT, last_seen_at TEXT, revoked_at TEXT,
+        user_agent TEXT, ip TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(user_id))""",
+    """CREATE TABLE IF NOT EXISTS audit_events(
+        event_id TEXT PRIMARY KEY, workspace_id TEXT, actor_user_id TEXT,
+        action TEXT NOT NULL, target_type TEXT, target_id TEXT,
+        metadata_json TEXT DEFAULT '{}', created_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_workspace_memberships_user ON workspace_memberships(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_workspace_memberships_workspace ON workspace_memberships(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_collections_workspace ON collections(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_collection_documents_doc ON collection_documents(document_id)",
+    "CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_events_workspace ON audit_events(workspace_id)",
+    "ALTER TABLE documents ADD COLUMN owner_user_id TEXT",
+    "ALTER TABLE documents ADD COLUMN workspace_id TEXT",
+    "ALTER TABLE documents ADD COLUMN classification TEXT",
+]
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     try:
         return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -159,6 +228,27 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 3, "knowledge-graph store (additive tables + indexes)")
         version = 3
+    if version < 4 <= target:
+        for stmt in MIGRATION_V4:
+            m = re.match(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", stmt)
+            if m and m.group(2) in _columns(conn, m.group(1)):
+                continue
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 4, "auth, workspaces, collections, audit (Slice 1)")
+        version = 4
+    if version < 5 <= target:
+        for stmt in MIGRATION_V5:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 5, "model provider registry (Slice 3)")
+        version = 5
+    if version < 6 <= target:
+        for stmt in MIGRATION_V6:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 6, "pipeline config versioning (Slice 4)")
+        version = 6
     conn.commit()
     return version
 

@@ -138,8 +138,8 @@ def test_pipeline_version_prefers_rag_spelling(monkeypatch):
 def test_migrate_v3_creates_graph_store(tmp_path):
     from src.ingestion import migrations as mig
     conn = sqlite3.connect(str(tmp_path / "g.db"))
-    assert mig.migrate(conn) == 3
-    assert mig.migrate(conn) == 3  # idempotent
+    assert mig.migrate(conn) == mig.CURRENT_VERSION
+    assert mig.migrate(conn) == mig.CURRENT_VERSION  # idempotent
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"graph_nodes", "graph_edges", "trace_links"} <= names
     for tbl, col in (("graph_nodes", "snapshot_id"), ("graph_edges", "is_inferred"),

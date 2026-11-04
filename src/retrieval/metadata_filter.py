@@ -57,13 +57,16 @@ def _keep(chunks: list[dict], plan: QueryPlan, rels: list[str],
 
 
 def apply_filters_ex(chunks: list[dict], plan: QueryPlan, release_override: str = "",
-                     flags: RetrievalFlags | None = None) -> tuple[list[dict], dict]:
+                     flags: RetrievalFlags | None = None,
+                     allowed_doc_ids: set[str] | None = None) -> tuple[list[dict], dict]:
     """Filter the corpus and report what was relaxed.
 
     Returns ``(chunks, trace)`` where the trace says which constraint was dropped and why.
     """
     flags = flags or default_flags()
     rels = [release_override] if release_override else plan.releases
+    if allowed_doc_ids is not None:
+        chunks = [c for c in chunks if c.get("document_id") in allowed_doc_ids]
     trace: dict = {"relaxed": [], "pool_size": 0, "corpus_size": len(chunks)}
 
     use_module = bool(flags.module_filter and plan.modules)

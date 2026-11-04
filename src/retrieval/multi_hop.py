@@ -25,6 +25,53 @@ Output ONLY the raw JSON array. If a single lookup suffices, return a one-elemen
 """
 
 
+def decompose_query(query: str, plan) -> list[str]:
+    """Return a list of sub-queries for multi-hop retrieval."""
+    out: list[str] = []
+    releases = getattr(plan, "releases", None) or []
+    modules = getattr(plan, "modules", None) or []
+    if getattr(plan, "release_mode", "") == "comparison" and releases:
+        for r in releases:
+            out.append(f"{query} AUTOSAR {r}")
+    if len(modules) > 1:
+        for m in modules:
+            out.append(f"{query} {m}")
+    if not out:
+        out = [query]
+    # dedup preserving order
+    seen = set()
+    uniq = []
+    for q in out:
+        if q not in seen:
+            seen.add(q)
+            uniq.append(q)
+    return uniq[:4]
+
+
+def detect_conflicts(evidence: list[dict]) -> list[dict]:
+    """Heuristic conflict detection across releases."""
+    by_release: dict[str, list[dict]] = {}
+    for c in evidence or []:
+        rel = c.get("autosar_release") or "unknown"
+        by_release.setdefault(rel, []).append(c)
+    conflicts = []
+    releases = list(by_release.keys())
+    for i in range(len(releases)):
+        for j in range(i + 1, len(releases)):
+            r1, r2 = releases[i], releases[j]
+            ids1 = {rid for c in by_release[r1] for rid in (c.get("requirement_ids") or [])}
+            ids2 = {rid for c in by_release[r2] for rid in (c.get("requirement_ids") or [])}
+            common = ids1 & ids2
+            if common:
+                conflicts.append({
+                    "type": "requirement_overlap",
+                    "releases": [r1, r2],
+                    "requirement_ids": sorted(common),
+                    "note": "Same requirement IDs appear in multiple releases; review for differences.",
+                })
+    return conflicts
+
+
 def plan_subqueries(profile: dict) -> list[dict]:
     """Return list of {'step','target','focus'} tasks. Always at least one."""
     base = {"step": 1, "target": "AUTOSAR context", "focus": profile.get("keywords", [""])[0] if profile.get("keywords") else ""}

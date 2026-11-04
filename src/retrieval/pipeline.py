@@ -126,9 +126,10 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ one release
     def _retrieve_release(self, release: str, queries: list[str], plan: QueryPlan,
-                          top_k_final: int) -> tuple[list[dict], dict]:
+                          top_k_final: int, allowed_doc_ids: set | None = None) -> tuple[list[dict], dict]:
         pool, filter_trace = apply_filters_ex(self.chunks, plan, release_override=release,
-                                               flags=self.flags)
+                                               flags=self.flags,
+                                               allowed_doc_ids=allowed_doc_ids)
         pool_ids = {c["chunk_id"] for c in pool}
         dense_scores, bm25_scores = self._channel_scores(queries)
         fused = self._fuse(dense_scores, bm25_scores, plan)
@@ -165,7 +166,7 @@ class RetrievalPipeline:
 
     # ------------------------------------------------------------------ corrective
     def _corrective(self, queries: list[str], plan: QueryPlan, evidence: list[dict],
-                    top_k_final: int) -> list[dict]:
+                    top_k_final: int, allowed_doc_ids: set | None = None) -> list[dict]:
         """Retry with the module constraint dropped before giving up (§6.2)."""
         if len(evidence) >= self.flags.corrective_min_evidence:
             return evidence
@@ -173,7 +174,8 @@ class RetrievalPipeline:
         saved = self.flags
         try:
             self.flags = relaxed
-            retry, _ = self._retrieve_release("", queries, plan, top_k_final)
+            retry, _ = self._retrieve_release("", queries, plan, top_k_final,
+                                             allowed_doc_ids=allowed_doc_ids)
         finally:
             self.flags = saved
         if len(retry) > len(evidence):
@@ -181,7 +183,8 @@ class RetrievalPipeline:
         return evidence
 
     # ------------------------------------------------------------------ public
-    def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None) -> dict:
+    def retrieve(self, query: str, top_k_final: int = 0, plan: QueryPlan | None = None,
+                 allowed_doc_ids: set | None = None, multi_hop_active: bool = False) -> dict:
         plan = plan or self.plan_for(query)
         top_k_final = top_k_final or settings.final_evidence
         if getattr(plan, "intent", None) == "configuration":
@@ -200,6 +203,16 @@ class RetrievalPipeline:
                         plan.modules.append(m)
             except Exception:
                 _refined_kw_string = ""
+
+        # Multi-hop decomposition (opt-in): split comparison/multi-module queries into
+        # independent sub-retrievals and merge their evidence.
+        _subqueries: list[str] = [query]
+        if (getattr(self.flags, "use_multi_hop", False) and not multi_hop_active):
+            try:
+                from .multi_hop import decompose_query as _decompose
+                _subqueries = _decompose(query, plan) or [query]
+            except Exception:
+                _subqueries = [query]
 
         queries = [query]
         if _refined_kw_string:
@@ -225,7 +238,8 @@ class RetrievalPipeline:
             merged: list[dict] = []
             seen: set[str] = set()
             for release in plan.releases:
-                rel_evidence, trace = self._retrieve_release(release, queries, plan, top_k_final)
+                rel_evidence, trace = self._retrieve_release(release, queries, plan, top_k_final,
+                                                            allowed_doc_ids=allowed_doc_ids)
                 per_rel[release] = len(rel_evidence)
                 filter_traces.append(trace)
                 for i in range(top_k_final):
@@ -234,17 +248,49 @@ class RetrievalPipeline:
                         merged.append(rel_evidence[i])
             evidence = merged[:top_k_final]
         else:
-            evidence, trace = self._retrieve_release("", queries, plan, top_k_final)
+            evidence, trace = self._retrieve_release("", queries, plan, top_k_final,
+                                                    allowed_doc_ids=allowed_doc_ids)
             filter_traces.append(trace)
 
+        # Multi-hop merge (opt-in): retrieve additional subqueries and merge unique evidence.
+        if (getattr(self.flags, "use_multi_hop", False) and not multi_hop_active
+                and len(_subqueries) > 1):
+            seen_ids = {c.get("chunk_id") for c in (evidence or [])}
+            merged = list(evidence or [])
+            for sq in _subqueries[1:]:
+                try:
+                    sub = self.retrieve(sq, top_k_final=top_k_final, plan=None,
+                                       allowed_doc_ids=allowed_doc_ids, multi_hop_active=True)
+                    for c in (sub.get("evidence") or []):
+                        if c.get("chunk_id") not in seen_ids:
+                            seen_ids.add(c.get("chunk_id"))
+                            merged.append(c)
+                except Exception:
+                    continue
+            evidence = merged[:top_k_final]
+
         if self.flags.corrective_loop:
-            evidence = self._corrective(queries, plan, evidence, top_k_final)
+            evidence = self._corrective(queries, plan, evidence, top_k_final,
+                                       allowed_doc_ids=allowed_doc_ids)
 
         retrieval_score = (float(np.mean([c.get("rerank_score", 0) for c in evidence]))
                            if evidence else 0.0)
+        try:
+            from .multi_hop import detect_conflicts as _dc
+            _conflicts = _dc(evidence)
+        except Exception:
+            _conflicts = []
+        try:
+            from ..graph.query import evidence_graph as _eg
+            from ..config.settings import settings as _gs
+            _graph = _eg(_gs.canonical_db, evidence)
+        except Exception:
+            _graph = []
         return {"plan": plan.model_dump(), "rewrites": getattr(plan, "corrections", []),
                 "evidence": evidence, "per_release": per_rel,
                 "retrieval_score": round(retrieval_score, 4),
                 "filter_trace": filter_traces,
                 "flags": self.flags.as_dict(),
-                "query_variants": queries}
+                "query_variants": queries,
+                "conflicts": _conflicts,
+                "graph": _graph}

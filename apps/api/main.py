@@ -10,17 +10,33 @@ if str(ROOT) not in sys.path:
 import json
 import os
 import sqlite3
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from src.config.settings import settings
+from src.config.pipeline_config import (create_config, get_active, list_configs,
+                                       activate_config, rollback, validate_config,
+                                       DEFAULT_CONFIG)
 from src.indexing.hybrid import HybridIndex, db_fingerprint, load_chunks
 from src.retrieval.pipeline import RetrievalPipeline
 from src.workflows.router import answer_query
 from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
 from src.chat.store import ChatStore, classify_outcome
+from src.schema.evidence import normalize_evidence
 from src.ingestion.pipeline import run as run_ingest
+from src.ingestion.migrations import migrate as migrate_canonical
+from src.security.auth import (hash_password, verify_password, create_session,
+                              resolve_session, revoke_session, authenticate,
+                              create_user)
+from src.security.workspaces import (create_workspace, add_member, get_membership,
+                                    list_workspaces_for_user, create_collection,
+                                    list_collections, add_document_to_collection,
+                                    authorized_document_ids, log_audit)
+from src.security.permissions import has_permission
+from src.generation.provider_registry import (create_provider, list_providers, get_provider,
+                                            update_provider, delete_provider, test_connection,
+                                            to_spec)
 from src.evaluation.datasets import write_seed
 
 app = FastAPI(title="AsrBrain API")
@@ -28,6 +44,28 @@ app = FastAPI(title="AsrBrain API")
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()
 _cancel: dict[str, bool] = {}
+
+
+def _canonical_conn():
+    conn = sqlite3.connect(settings.canonical_db)
+    conn.execute("PRAGMA foreign_keys = ON")
+    migrate_canonical(conn)
+    return conn
+
+
+def _current_user(request) -> str | None:
+    token = request.cookies.get("asrbrain_session")
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    conn = _canonical_conn()
+    try:
+        return resolve_session(conn, token)
+    finally:
+        conn.close()
 # Single source of truth for the pipeline flag: settings reads RAG_PIPELINE_VERSION
 # first, ASRBRAIN_PIPELINE_VERSION as fallback.
 PIPELINE_VERSION = settings.pipeline_version
@@ -101,6 +139,414 @@ def evaluate():
                          "reports/evaluation/validated.json")["summary"]
 
 
+# ---------------- Slice 1: auth, workspaces, collections ----------------
+
+class BootstrapRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str = ""
+    workspace_name: str = "Default workspace"
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class WorkspaceCreate(BaseModel):
+    name: str
+    slug: str = ""
+
+
+class MemberAdd(BaseModel):
+    user_id: str
+    role: str = "member"
+
+
+class CollectionCreate(BaseModel):
+    workspace_id: str
+    name: str
+    description: str = ""
+    visibility: str = "private"
+
+
+class CollectionDoc(BaseModel):
+    document_id: str
+
+
+def _require_user(request: Request) -> str:
+    uid = _current_user(request)
+    if not uid:
+        raise HTTPException(401, "authentication required")
+    return uid
+
+
+def _allowed_docs_for(request: Request) -> set | None:
+    uid = _current_user(request)
+    if not uid:
+        return None
+    conn = _canonical_conn()
+    try:
+        workspaces = list_workspaces_for_user(conn, uid)
+        if not workspaces:
+            return set()
+        ws = workspaces[0]["workspace_id"]
+        role = workspaces[0]["role"]
+        return authorized_document_ids(conn, uid, ws, role)
+    finally:
+        conn.close()
+
+
+def _require_workspace(conn, user_id: str, workspace_id: str, permission: str) -> str:
+    role = get_membership(conn, user_id, workspace_id)
+    if not role:
+        raise HTTPException(404, "workspace not found")
+    if not has_permission(role, permission):
+        raise HTTPException(403, "permission denied")
+    return role
+
+
+@app.post("/api/auth/bootstrap")
+def auth_bootstrap(body: BootstrapRequest, response: Response):
+    conn = _canonical_conn()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count > 0:
+            raise HTTPException(409, "bootstrap already completed")
+        uid = create_user(conn, body.email, body.password, body.display_name, "active")
+        ws = create_workspace(conn, body.workspace_name, body.workspace_name.lower().replace(" ", "-"), uid)
+        add_member(conn, ws, uid, "owner", uid)
+        log_audit(conn, ws, uid, "bootstrap", "user", uid)
+        token = create_session(conn, uid)
+        response.set_cookie("asrbrain_session", token, httponly=True, samesite="lax", secure=False)
+        return {"user_id": uid, "workspace_id": ws, "token": token}
+    finally:
+        conn.close()
+
+
+@app.post("/api/auth/login")
+def auth_login(body: LoginRequest, response: Response):
+    conn = _canonical_conn()
+    try:
+        uid = authenticate(conn, body.email, body.password)
+        if not uid:
+            raise HTTPException(401, "invalid credentials")
+        token = create_session(conn, uid)
+        response.set_cookie("asrbrain_session", token, httponly=True, samesite="lax", secure=False)
+        return {"user_id": uid, "token": token}
+    finally:
+        conn.close()
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request, response: Response):
+    token = request.cookies.get("asrbrain_session")
+    auth = request.headers.get("authorization", "")
+    if not token and auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1].strip()
+    if token:
+        conn = _canonical_conn()
+        try:
+            revoke_session(conn, token)
+        finally:
+            conn.close()
+    response.delete_cookie("asrbrain_session")
+    return {"status": "ok"}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    uid = _current_user(request)
+    if not uid:
+        raise HTTPException(401, "not authenticated")
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT user_id,email,display_name,status FROM users WHERE user_id = ?",
+                           (uid,)).fetchone()
+        if not row:
+            raise HTTPException(401, "not authenticated")
+        workspaces = list_workspaces_for_user(conn, uid)
+        return {"user_id": row[0], "email": row[1], "display_name": row[2],
+                "status": row[3], "workspaces": workspaces}
+    finally:
+        conn.close()
+
+
+@app.get("/api/workspaces")
+def list_workspaces(request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        return {"workspaces": list_workspaces_for_user(conn, uid)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/workspaces")
+def create_workspace_endpoint(body: WorkspaceCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        ws = create_workspace(conn, body.name, body.slug or body.name.lower().replace(" ", "-"), uid)
+        add_member(conn, ws, uid, "owner", uid)
+        log_audit(conn, ws, uid, "workspace.create", "workspace", ws)
+        return {"workspace_id": ws}
+    finally:
+        conn.close()
+
+
+@app.get("/api/workspaces/{workspace_id}/members")
+def list_members(workspace_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        role = _require_workspace(conn, uid, workspace_id, "workspace.read")
+        rows = conn.execute(
+            "SELECT user_id,role FROM workspace_memberships WHERE workspace_id = ?",
+            (workspace_id,)).fetchall()
+        return {"members": [{"user_id": r[0], "role": r[1]} for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/workspaces/{workspace_id}/members")
+def add_member_endpoint(workspace_id: str, body: MemberAdd, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        role = _require_workspace(conn, uid, workspace_id, "members.manage")
+        add_member(conn, workspace_id, body.user_id, body.role, uid)
+        log_audit(conn, workspace_id, uid, "member.add", "user", body.user_id,
+                  {"role": body.role})
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.get("/api/collections")
+def list_collections_endpoint(workspace_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        role = _require_workspace(conn, uid, workspace_id, "collection.read")
+        return {"collections": list_collections(conn, workspace_id, uid, role)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/collections")
+def create_collection_endpoint(body: CollectionCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        role = _require_workspace(conn, uid, body.workspace_id, "collection.create")
+        cid = create_collection(conn, body.workspace_id, body.name, body.description,
+                                body.visibility, uid)
+        log_audit(conn, body.workspace_id, uid, "collection.create", "collection", cid)
+        return {"collection_id": cid}
+    finally:
+        conn.close()
+
+
+@app.post("/api/collections/{collection_id}/documents")
+def add_collection_document(collection_id: str, body: CollectionDoc, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT workspace_id,owner_id FROM collections WHERE collection_id = ?",
+                           (collection_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "collection not found")
+        workspace_id, owner_id = row
+        role = _require_workspace(conn, uid, workspace_id, "collection.update")
+        add_document_to_collection(conn, collection_id, body.document_id, uid)
+        # tag document workspace if unset
+        conn.execute("UPDATE documents SET workspace_id = COALESCE(workspace_id, ?), "
+                     "owner_user_id = COALESCE(owner_user_id, ?) WHERE document_id = ?",
+                     (workspace_id, uid, body.document_id))
+        conn.commit()
+        log_audit(conn, workspace_id, uid, "collection.add_document", "document",
+                  body.document_id, {"collection_id": collection_id})
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+class ProviderCreate(BaseModel):
+    workspace_id: str = ""
+    name: str
+    kind: str = "ollama"
+    task: str = "generation"
+    base_url: str = "http://127.0.0.1:11434"
+    model: str = ""
+    api_key_env: str = ""
+    timeout_s: float = 120.0
+    data_transfer_policy: str = "local_only"
+    enabled: bool = True
+
+
+@app.get("/api/providers")
+def list_providers_endpoint(workspace_id: str = "", task: str = "", request: Request = None):
+    conn = _canonical_conn()
+    try:
+        return {"providers": list_providers(conn, workspace_id or None, task or None)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers")
+def create_provider_endpoint(body: ProviderCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        if body.workspace_id:
+            _require_workspace(conn, uid, body.workspace_id, "workspace.manage" if False else "workspace.read")
+        pid = create_provider(conn, body.workspace_id or None, body.name, body.kind, body.task,
+                              body.base_url, body.model, body.api_key_env, body.timeout_s,
+                              body.data_transfer_policy, body.enabled)
+        log_audit(conn, body.workspace_id or None, uid, "provider.create", "provider", pid)
+        return {"provider_id": pid}
+    finally:
+        conn.close()
+
+
+@app.get("/api/providers/{provider_id}")
+def get_provider_endpoint(provider_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        p = get_provider(conn, provider_id)
+        if not p:
+            raise HTTPException(404, "provider not found")
+        return p
+    finally:
+        conn.close()
+
+
+@app.patch("/api/providers/{provider_id}")
+def update_provider_endpoint(provider_id: str, body: dict, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        ok = update_provider(conn, provider_id, **(body or {}))
+        if not ok:
+            raise HTTPException(404, "provider not found")
+        log_audit(conn, None, uid, "provider.update", "provider", provider_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/providers/{provider_id}")
+def delete_provider_endpoint(provider_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        delete_provider(conn, provider_id)
+        log_audit(conn, None, uid, "provider.delete", "provider", provider_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers/{provider_id}/test")
+def test_provider_endpoint(provider_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        p = get_provider(conn, provider_id)
+        if not p:
+            raise HTTPException(404, "provider not found")
+        return test_connection(p)
+    finally:
+        conn.close()
+
+
+@app.post("/api/providers/test")
+def test_provider_inline(body: ProviderCreate):
+    p = body.dict()
+    return test_connection(p)
+
+
+class PipelineConfigCreate(BaseModel):
+    config: dict
+    note: str = ""
+    activate: bool = False
+
+
+@app.get("/api/config/pipeline")
+def get_pipeline_config():
+    conn = _canonical_conn()
+    try:
+        active = get_active(conn)
+        if not active:
+            return {"config": DEFAULT_CONFIG, "version": 0, "active": False}
+        return active
+    finally:
+        conn.close()
+
+
+@app.get("/api/config/pipeline/versions")
+def list_pipeline_configs(request: Request):
+    _require_user(request)
+    conn = _canonical_conn()
+    try:
+        return {"versions": list_configs(conn)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline")
+def create_pipeline_config(body: PipelineConfigCreate, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        # admin/owner only
+        # allow if any workspace membership role owner/admin
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        cid = create_config(conn, body.config, created_by=uid, note=body.note, activate=body.activate)
+        log_audit(conn, None, uid, "config.create", "pipeline_config", cid)
+        return {"config_id": cid}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline/{config_id}/activate")
+def activate_pipeline_config(config_id: str, request: Request):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        if not activate_config(conn, config_id):
+            raise HTTPException(404, "config not found")
+        log_audit(conn, None, uid, "config.activate", "pipeline_config", config_id)
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/config/pipeline/rollback")
+def rollback_pipeline_config(request: Request, version: int | None = None):
+    uid = _require_user(request)
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute(
+            "SELECT role FROM workspace_memberships WHERE user_id = ?", (uid,)).fetchall()
+        if not any(r[0] in ("owner", "admin") for r in rows):
+            raise HTTPException(403, "admin required")
+        cid = rollback(conn, version)
+        if not cid:
+            raise HTTPException(404, "nothing to roll back to")
+        log_audit(conn, None, uid, "config.rollback", "pipeline_config", cid)
+        return {"config_id": cid}
+    finally:
+        conn.close()
+
+
 # ---------------- Part D: chat contract ----------------
 
 class ConversationCreate(BaseModel):
@@ -154,8 +600,17 @@ def _slots_from_req(req: ChatRequest) -> dict:
 
 
 @app.post("/api/conversations")
-def api_conv_create(body: ConversationCreate):
-    return _store.create(body.title)
+def api_conv_create(body: ConversationCreate, request: Request):
+    uid = _current_user(request)
+    ws = None
+    if uid:
+        conn = _canonical_conn()
+        try:
+            workspaces = list_workspaces_for_user(conn, uid)
+            ws = workspaces[0]["workspace_id"] if workspaces else None
+        finally:
+            conn.close()
+    return _store.create(body.title, owner_user_id=uid, workspace_id=ws)
 
 
 @app.get("/api/conversations")
@@ -202,10 +657,11 @@ def api_conv_import(bundle: dict):
 
 
 @app.post("/api/chat")
-def api_chat(req: ChatRequest):
+def api_chat(req: ChatRequest, request: Request):
     cid = req.conversation_id or _store.create().get("id")
     if req.conversation_id and not _store.get(cid):
         raise HTTPException(404, "conversation not found")
+    allowed_docs = _allowed_docs_for(request)
     _store.merge_slots(cid, releases=req.release_filter, platforms=req.platform_filter,
                        modules=req.module_filter)
     slots = _store.get_slots(cid) | _slots_from_req(req)
@@ -218,7 +674,8 @@ def api_chat(req: ChatRequest):
     cancel: dict = {}
     import time as _time
     _t0 = _time.time()
-    events = list(run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior))
+    events = list(run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior,
+                             allowed_doc_ids=allowed_docs))
     final = next((e for e in reversed(events) if e.get("event") == "complete"), None)
     clarify = next((e for e in events if e.get("event") == "clarify"), None)
     if clarify is not None:
@@ -243,8 +700,9 @@ def api_chat(req: ChatRequest):
 
 
 @app.post("/api/chat/stream")
-def api_chat_stream(req: ChatRequest):
+def api_chat_stream(req: ChatRequest, request: Request):
     cid = req.conversation_id or _store.create().get("id")
+    allowed_docs = _allowed_docs_for(request)
     _store.merge_slots(cid, releases=req.release_filter, platforms=req.platform_filter,
                        modules=req.module_filter)
     slots = _store.get_slots(cid) | _slots_from_req(req)
@@ -258,7 +716,8 @@ def api_chat_stream(req: ChatRequest):
     def gen():
         answer_parts: list[str] = []
         last: dict = {}
-        for ev in run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior):
+        for ev in run_staged(get_pipe(), req.message, spec, cancel, slots, history=prior,
+                             allowed_doc_ids=allowed_docs):
             if _cancel.get(cid):
                 ev = {"event": "status", "stage": "cancelled", "message": "stopped"}
                 yield f"data: {json.dumps(ev)}\n\n"
@@ -313,14 +772,65 @@ def api_docs():
 
 
 @app.get("/api/documents/{doc_id}")
-def api_doc_get(doc_id: str):
-    conn = sqlite3.connect(settings.canonical_db)
-    conn.row_factory = sqlite3.Row
-    r = conn.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
-    conn.close()
-    if not r:
-        raise HTTPException(404, "document not found")
-    return dict(r)
+def api_doc_get(doc_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "document not found")
+        cols = [d[0] for d in conn.execute("SELECT * FROM documents LIMIT 1").description]
+        data = dict(zip(cols, row))
+        uid = _current_user(request)
+        if uid:
+            allowed = _allowed_docs_for(request)
+            if allowed is not None and doc_id not in (allowed or set()):
+                raise HTTPException(403, "access denied")
+        return data
+    finally:
+        conn.close()
+
+
+@app.get("/api/documents/{doc_id}/preview")
+def api_doc_preview(doc_id: str, request: Request):
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT source_pdf FROM documents WHERE document_id = ?", (doc_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "document not found")
+        source_pdf = row[0] or ""
+        uid = _current_user(request)
+        if uid:
+            allowed = _allowed_docs_for(request)
+            if allowed is not None and doc_id not in (allowed or set()):
+                raise HTTPException(403, "access denied")
+    finally:
+        conn.close()
+    if not source_pdf:
+        raise HTTPException(404, "source file not available")
+    # Resolve safely under repo root or configured pdf dir.
+    root = Path(ROOT)
+    candidate = (root / source_pdf).resolve() if not os.path.isabs(source_pdf) else Path(source_pdf).resolve()
+    if not candidate.exists():
+        # try pdf dir
+        candidate = (root / settings.pdf_dir / os.path.basename(source_pdf)).resolve()
+    if not candidate.exists() or root not in candidate.parents and candidate != root:
+        raise HTTPException(404, "source file not available")
+    media = "application/pdf" if candidate.suffix.lower() == ".pdf" else "application/octet-stream"
+    return FileResponse(str(candidate), media_type=media, filename=candidate.name)
+
+
+@app.get("/api/evidence/{evidence_id}")
+def api_evidence_get(evidence_id: str, request: Request):
+    chunks = load_chunks(settings.canonical_db)
+    chunk = next((c for c in chunks if c.get("chunk_id") == evidence_id), None)
+    if not chunk:
+        raise HTTPException(404, "evidence not found")
+    uid = _current_user(request)
+    if uid:
+        allowed = _allowed_docs_for(request)
+        if allowed is not None and chunk.get("document_id") not in (allowed or set()):
+            raise HTTPException(403, "access denied")
+    return normalize_evidence(chunk)
 
 
 @app.post("/api/documents/{doc_id}/reprocess")
