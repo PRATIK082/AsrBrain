@@ -594,8 +594,11 @@ def _provider_spec(req: ChatRequest) -> ProviderSpec:
         return ProviderSpec(kind="openai_compat", model=req.model or "gpt-4o-mini",
                             base_url=req.base_url or "https://api.openai.com/v1",
                             api_key=req.api_key, timeout_s=settings.ollama_timeout_s)
-    from src.generation.answer import pick_model
-    return ProviderSpec(kind="ollama", model=req.model or pick_model(),
+    from src.generation.answer import pick_model, available_models
+    model = req.model or pick_model()
+    if model not in available_models() and available_models():
+        model = pick_model()
+    return ProviderSpec(kind="ollama", model=model,
                         base_url=settings.ollama_base_url, timeout_s=settings.ollama_timeout_s)
 
 
