@@ -9,6 +9,7 @@ import { ChatMessage } from "../components/chat/ChatMessage";
 import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
 import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
 import EvaluationView from "../components/eval/EvaluationView";
+import { SystemContextPanel } from "../components/SystemContextPanel";
 
 type Tab = "chat" | "arxml" | "diff" | "code" | "evaluation";
 
@@ -84,6 +85,7 @@ function ChatPane() {
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void importBundle(f); e.target.value = ""; }} />
       </div>
       {processing && <p className="bg-[#121824] px-4 py-1 font-mono text-xs text-[#00F5FF]">Routing: {processing}</p>}
+      <SystemContextPanel />
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
         {currentStages.length > 0 && <PipelineTelemetry stages={currentStages} />}
         {messages.map((m) => (
