@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.settings import settings
+from src.config.deployment import load_profile
 
 
 PROFILES = ("workstation", "onprem-server", "cloud-saas")
@@ -150,6 +151,7 @@ def build_self_context() -> dict[str, Any]:
 
     return {
         "profile": profile,
+        "profile_config": load_profile(profile),
         "version": {
             "app": "asrbrain",
             "pipeline": settings.pipeline_version,
