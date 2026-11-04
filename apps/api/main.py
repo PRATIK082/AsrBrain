@@ -220,6 +220,20 @@ async def admin_restore(request: Request, file: UploadFile = File(...)):
     return {"restored": True, "by": user}
 
 
+@app.get("/api/admin/embedding-benchmark")
+def embedding_benchmark(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    finally:
+        conn.close()
+    return {"backend": settings.embedding_backend, "chunks": chunks,
+            "note": "Switch ASRBRAIN_EMBEDDING_BACKEND and re-index to compare; golden-set eval provides metrics."}
+
+
 @app.post("/api/admin/purge")
 def admin_purge(body: dict, request: Request):
     user = _require_user(request)
@@ -713,6 +727,18 @@ def _provider_spec(req: ChatRequest) -> ProviderSpec:
         return ProviderSpec(kind="openai_compat", model=req.model or "gpt-4o-mini",
                             base_url=req.base_url or "https://api.openai.com/v1",
                             api_key=req.api_key, timeout_s=settings.ollama_timeout_s)
+    # Per-task model routing: prefer a registered provider for chat when available.
+    try:
+        conn = _canonical_conn()
+        try:
+            from src.generation.provider_registry import list_providers, to_spec
+            providers = list_providers(conn, task="chat")
+            if providers and not req.model:
+                return to_spec(providers[0])
+        finally:
+            conn.close()
+    except Exception:
+        pass
     from src.generation.answer import pick_model, available_models
     model = req.model or pick_model()
     if model not in available_models() and available_models():
@@ -1129,6 +1155,30 @@ def api_arxml_topology(artifact_id: str, tenant: str = "default"):
     if not entry or entry["topology"].artifact.tenant_id != tenant:
         raise HTTPException(404, "artifact not found or access denied")
     return entry["topology"].model_dump()
+
+
+@app.get("/api/arxml/topology/mermaid")
+def api_arxml_topology_mermaid(artifact_id: str, tenant: str = "default"):
+    entry = _ARXML_STORE.get(artifact_id)
+    if not entry or entry["topology"].artifact.tenant_id != tenant:
+        raise HTTPException(404, "artifact not found or access denied")
+    topo = entry["topology"]
+    lines = ["flowchart LR"]
+    ids = {}
+    for c in topo.components:
+        nid = "C" + str(len(ids))
+        ids[c.qualified_name] = nid
+        lines.append(f'  {nid}["{c.short_name}"]')
+    for conn in topo.connectors:
+        src = ids.get(conn.provider_component_ref or "")
+        dst = ids.get(conn.requester_component_ref or "")
+        if src and dst:
+            label = conn.connector_type or "conn"
+            lines.append(f'  {src} -->|{label}| {dst}')
+    if not any("-->" in l for l in lines):
+        # fallback: list components only
+        pass
+    return {"mermaid": "\\n".join(lines)}
 
 
 @app.get("/api/arxml/nodes/{node_id}/neighbors")
