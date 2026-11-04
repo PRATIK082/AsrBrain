@@ -236,7 +236,7 @@ export default function EngineeringPage() {
       <aside className="w-64 border-r p-4">
         <h1 className="font-bold">AsrBrain</h1>
         {(["chat", "arxml", "diff", "code", "evaluation", "admin"] as Tab[]).map((t) => (
-          <button key={t} className={`mt-2 w-full rounded border p-2 text-left ${tab === t ? "bg-black text-white" : ""}`} onClick={() => setTab(t)}>
+          <button key={t} className={`mt-2 w-full rounded border p-2 text-left ${tab === t ? "bg-black text-white" : ""}`} aria-label={t} onClick={() => setTab(t)}>
             {t === "chat" ? "💬 Chat" : t === "arxml" ? "🧩 ARXML Explorer" : t === "diff" ? "🔀 Diff Studio" : t === "code" ? "🔍 Code Review" : "📊 Evaluation"}
           </button>
         ))}
