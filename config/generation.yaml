@@ -10,7 +10,7 @@
 response_presets:
   concise: 400    # base: quick look, ~1-2 min on CPU
   standard: 1200  # default: definitions + short procedures
-  detailed: 2000  # long configuration procedures; keep prompt+output < num_ctx
+  detailed: 3000  # long configuration procedures; keep prompt+output < num_ctx
 
 # Context window passed to local Ollama (num_ctx). Lower it if you hit memory limits.
 num_ctx: 8192

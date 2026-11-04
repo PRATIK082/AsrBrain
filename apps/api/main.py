@@ -10,6 +10,9 @@ if str(ROOT) not in sys.path:
 import json
 import os
 import sqlite3
+import time
+import uuid
+import logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -42,9 +45,39 @@ from src.evaluation.datasets import write_seed
 
 app = FastAPI(title="AsrBrain API")
 
+
+@app.middleware("http")
+async def _observability_middleware(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid.uuid4())
+    start = time.time()
+    # Simple per-client rate limit
+    client = request.client.host if request.client else "unknown"
+    now = time.time()
+    bucket = _RATE_BUCKETS.setdefault(client, [])
+    bucket[:] = [t for t in bucket if now - t < 60]
+    if len(bucket) >= _RATE_LIMIT:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "rate limit exceeded"}, status_code=429,
+                            headers={"X-Request-ID": rid})
+    bucket.append(now)
+    response = await call_next(request)
+    dur_ms = round((time.time() - start) * 1000, 1)
+    response.headers["X-Request-ID"] = rid
+    _METRICS["requests"] += 1
+    _METRICS["latency_ms_sum"] += dur_ms
+    if response.status_code >= 400:
+        _METRICS["errors"] += 1
+    _logger.info("%s %s %s %sms rid=%s", request.method, request.url.path,
+                 response.status_code, dur_ms, rid)
+    return response
+
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()
 _cancel: dict[str, bool] = {}
+_logger = logging.getLogger("asrbrain.api")
+_RATE_BUCKETS: dict[str, list[float]] = {}
+_RATE_LIMIT = int(os.environ.get("ASRBRAIN_RATE_LIMIT_PER_MIN", "120"))
+_METRICS: dict[str, float] = {"requests": 0, "errors": 0, "latency_ms_sum": 0.0}
 
 
 def _canonical_conn():
@@ -117,6 +150,41 @@ def self_context():
 def feature_catalog():
     """List discoverable features and their availability on this instance."""
     return {"features": build_self_context()["features"]}
+
+
+@app.get("/api/admin/metrics")
+def admin_metrics(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    reqs = _METRICS["requests"] or 1
+    return {
+        "requests": int(_METRICS["requests"]),
+        "errors": int(_METRICS["errors"]),
+        "avg_latency_ms": round(_METRICS["latency_ms_sum"] / reqs, 1),
+        "context": build_self_context(),
+    }
+
+
+@app.get("/api/admin/backup")
+def admin_backup(request: Request):
+    """Create a zip backup of canonical and chat databases (authenticated)."""
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    import zipfile
+    from pathlib import Path
+    backup_dir = Path("data/backups")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out = backup_dir / f"asrbrain-backup-{stamp}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in (settings.canonical_db, "data/canonical/chat.db"):
+            path = Path(p)
+            if path.exists():
+                zf.write(path, arcname=path.name)
+    log_audit(_canonical_conn(), None, user, "backup", "system", str(out))
+    return {"backup_path": str(out), "created_by": user}
 
 
 @app.post("/query")

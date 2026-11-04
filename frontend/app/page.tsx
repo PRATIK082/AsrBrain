@@ -9,9 +9,11 @@ import { ChatMessage } from "../components/chat/ChatMessage";
 import { PipelineTelemetry } from "../components/chat/PipelineTelemetry";
 import { AsrCitationDrawer } from "../components/chat/AsrCitationDrawer";
 import EvaluationView from "../components/eval/EvaluationView";
+import { AdminView } from "../components/AdminView";
 import { SystemContextPanel } from "../components/SystemContextPanel";
+import { OnboardingWizard } from "../components/OnboardingWizard";
 
-type Tab = "chat" | "arxml" | "diff" | "code" | "evaluation";
+type Tab = "chat" | "arxml" | "diff" | "code" | "evaluation" | "admin";
 
 function ChatPane() {
   const [input, setInput] = useState("");
@@ -86,6 +88,7 @@ function ChatPane() {
       </div>
       {processing && <p className="bg-[#121824] px-4 py-1 font-mono text-xs text-[#00F5FF]">Routing: {processing}</p>}
       <SystemContextPanel />
+      <OnboardingWizard />
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
         {currentStages.length > 0 && <PipelineTelemetry stages={currentStages} />}
         {messages.map((m) => (
@@ -232,14 +235,14 @@ export default function EngineeringPage() {
     <main className="flex h-screen">
       <aside className="w-64 border-r p-4">
         <h1 className="font-bold">AsrBrain</h1>
-        {(["chat", "arxml", "diff", "code", "evaluation"] as Tab[]).map((t) => (
+        {(["chat", "arxml", "diff", "code", "evaluation", "admin"] as Tab[]).map((t) => (
           <button key={t} className={`mt-2 w-full rounded border p-2 text-left ${tab === t ? "bg-black text-white" : ""}`} onClick={() => setTab(t)}>
             {t === "chat" ? "💬 Chat" : t === "arxml" ? "🧩 ARXML Explorer" : t === "diff" ? "🔀 Diff Studio" : t === "code" ? "🔍 Code Review" : "📊 Evaluation"}
           </button>
         ))}
         <p className="mt-4 text-xs text-gray-500">Processed locally unless approved policy shows otherwise. No chain-of-thought displayed.</p>
       </aside>
-      {tab === "chat" ? <ChatPane /> : tab === "arxml" ? <ArxmlPane /> : tab === "diff" ? <DiffPane /> : tab === "code" ? <CodePane /> : <EvaluationView />}
+      {tab === "chat" ? <ChatPane /> : tab === "arxml" ? <ArxmlPane /> : tab === "diff" ? <DiffPane /> : tab === "code" ? <CodePane /> : tab === "evaluation" ? <EvaluationView /> : <AdminView />}
     </main>
   );
 }
