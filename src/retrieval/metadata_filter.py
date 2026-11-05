@@ -52,6 +52,11 @@ def _keep(chunks: list[dict], plan: QueryPlan, rels: list[str],
         if module_constraint and plan.modules and c.get("module"):
             if c["module"] not in plan.modules:
                 continue
+        if getattr(plan, "asil_levels", None) and c.get("asil"):
+            chunk_levels = [x.strip().upper() for x in str(c.get("asil")).split(",")]
+            wanted = [x.strip().upper() for x in plan.asil_levels]
+            if not any(w in chunk_levels for w in wanted):
+                continue
         out.append(c)
     return out
 

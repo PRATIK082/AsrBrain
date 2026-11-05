@@ -10,7 +10,7 @@ import os
 import sqlite3
 from .pdf_extract import discover_pdfs, sha256_file, normalize_page_text, extract_signals
 from .parsers import get_parser, parser_quality_report
-from .metadata import detect_release_platform, infer_module
+from .metadata import detect_release_platform, infer_module, detect_asil
 from .chunking import build_chunks
 from .migrations import migrate, new_run, close_run, content_hash
 
@@ -71,23 +71,25 @@ def run(pdf_dir: str, out: str, module_hint: str = "", parser: str = "auto") -> 
             prior = conn.execute("SELECT document_id, sha256 FROM documents WHERE source_pdf=? "
                                  "ORDER BY rowid", (pdf,)).fetchall()
             supersedes = next((d for d, s in prior if d != document_id), None)
+            asil = detect_asil(full)
             conn.execute(
                 "INSERT OR REPLACE INTO documents(document_id, source_pdf, sha256, title,"
                 " autosar_release, platform, module, document_type, page_count, quality,"
-                " snapshot_id, content_hash, supersedes_doc_id, created_by, confidence)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " snapshot_id, content_hash, supersedes_doc_id, created_by, confidence, asil)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (document_id, pdf, sha, os.path.basename(pdf), release, platform,
                  module, doctype, len(pages), qr["quality_score"],
-                 snapshot_id, sha, supersedes, "parser", qr["quality_score"]))
+                 snapshot_id, sha, supersedes, "parser", qr["quality_score"], asil))
             chunks = build_chunks(document_id, pdf, sha, release, platform, module, doctype, pages)
+            asil = detect_asil(full)
             for c in chunks:
                 conn.execute(
                     "INSERT OR REPLACE INTO chunks(chunk_id, document_id, source_pdf, sha256,"
                     " page_start, page_end, pdf_page_index, autosar_release, platform, module,"
                     " document_type, section_number, section_title, requirement_ids, api_names,"
                     " ecu_parameters, parent_chunk_id, chunk_kind, text, normalized_text,"
-                    " snapshot_id, content_hash, created_by, confidence)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " snapshot_id, content_hash, created_by, confidence, asil)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (c.chunk_id, c.document_id, c.source_pdf, c.source_sha256, c.page_start,
                      c.page_end, c.pdf_page_index, c.autosar_release, c.platform, c.module,
                      c.document_type, c.section_number, c.section_title,
@@ -95,7 +97,7 @@ def run(pdf_dir: str, out: str, module_hint: str = "", parser: str = "auto") -> 
                      json.dumps(c.ecu_parameters), c.parent_chunk_id, c.chunk_kind,
                      c.text, c.normalized_text,
                      snapshot_id, content_hash(c.normalized_text), "parser",
-                     qr["quality_score"]))
+                     qr["quality_score"], asil))
             # first atomic chunk per page, so sidecars join back to text (M4)
             page_chunk: dict[int, str] = {}
             for c in chunks:

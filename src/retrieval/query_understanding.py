@@ -72,6 +72,10 @@ def parse(query: str) -> QueryPlan:
         if canon and canon not in plan.modules:
             plan.modules.append(canon)
     plan.requirement_ids = sorted(set(r.strip("[]") for r in REQ_RE.findall(qc) if isinstance(r, str)))
+    # ASIL levels (safety goals): detect "ASIL D", "ASIL-A", etc.
+    asil_found = set(re.findall(r"\bASIL\s*[- ]?\s*(QM|A|B|C|D)\b", qc, re.IGNORECASE))
+    prio = {"QM": 0, "A": 1, "B": 2, "C": 3, "D": 4}
+    plan.asil_levels = sorted(asil_found, key=lambda x: prio.get(x.upper(), 0), reverse=True)
     # document types (whole-word: bare "rs" must not fire inside "first")
     for dt in ("SWS", "PRS", "RS", "TPS", "TR"):
         if word_hit(ql, dt.lower()) or dt in qc.split():

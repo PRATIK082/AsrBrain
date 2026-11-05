@@ -1651,3 +1651,246 @@ def config_diff(from_version: int, to_version: int):
     except Exception:
         diff = {"from": a.get("config_json"), "to": b.get("config_json")}
     return {"from_version": from_version, "to_version": to_version, "diff": diff}
+
+
+# ---------------- Full OIDC provider integration ----------------
+import base64
+import hashlib
+import secrets
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _oidc_provider_config(conn, provider_id: str) -> dict | None:
+    if provider_id in ("env", "default"):
+        issuer = os.environ.get("ASRBRAIN_OIDC_ISSUER", "")
+        client_id = os.environ.get("ASRBRAIN_OIDC_CLIENT_ID", "")
+        if not issuer or not client_id:
+            return None
+        return {
+            "provider_id": "env",
+            "name": os.environ.get("ASRBRAIN_OIDC_PROVIDER_NAME", "env"),
+            "issuer": issuer.rstrip("/"),
+            "client_id": client_id,
+            "client_secret_env": "ASRBRAIN_OIDC_CLIENT_SECRET",
+            "redirect_uri": os.environ.get("ASRBRAIN_OIDC_REDIRECT_URI", ""),
+            "scopes": os.environ.get("ASRBRAIN_OIDC_SCOPES", "openid profile email"),
+            "enabled": 1,
+        }
+    row = conn.execute(
+        "SELECT provider_id,name,issuer,client_id,client_secret_env,redirect_uri,scopes,enabled "
+        "FROM oidc_providers WHERE provider_id=?",
+        (provider_id,),
+    ).fetchone()
+    if not row:
+        return None
+    keys = ["provider_id", "name", "issuer", "client_id", "client_secret_env",
+            "redirect_uri", "scopes", "enabled"]
+    return dict(zip(keys, row))
+
+
+def _oidc_discovery(issuer: str) -> dict:
+    import httpx
+    url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+    with httpx.Client(timeout=10.0) as client:
+        r = client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+
+@app.get("/api/auth/oidc/providers")
+def list_oidc_providers(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        rows = [dict(zip(["provider_id", "name", "issuer", "client_id", "redirect_uri", "scopes", "enabled"],
+                         r)) for r in conn.execute(
+            "SELECT provider_id,name,issuer,client_id,redirect_uri,scopes,enabled FROM oidc_providers"
+        ).fetchall()]
+    finally:
+        conn.close()
+    env_cfg = _oidc_provider_config(None, "env")
+    if env_cfg:
+        rows.append({k: env_cfg[k] for k in ("provider_id", "name", "issuer", "client_id",
+                                             "redirect_uri", "scopes", "enabled")})
+    return {"providers": rows}
+
+
+@app.post("/api/auth/oidc/providers")
+def create_oidc_provider(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    pid = body.get("provider_id") or ("oidc-" + secrets.token_hex(6))
+    conn = _canonical_conn()
+    try:
+        conn.execute(
+            "INSERT INTO oidc_providers(provider_id,name,issuer,client_id,client_secret_env,"
+            "redirect_uri,scopes,enabled,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (pid, body.get("name", pid), body.get("issuer"), body.get("client_id"),
+             body.get("client_secret_env"), body.get("redirect_uri"),
+             body.get("scopes", "openid profile email"), 1 if body.get("enabled", True) else 0,
+             user, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        log_audit(conn, None, user, "oidc_provider.create", "oidc_provider", pid)
+    finally:
+        conn.close()
+    return {"provider_id": pid}
+
+
+@app.get("/api/auth/oidc/{provider_id}/login")
+def oidc_login(provider_id: str, request: Request, redirect_to: str = "/"):
+    conn = _canonical_conn()
+    try:
+        cfg = _oidc_provider_config(conn, provider_id)
+    finally:
+        conn.close()
+    if not cfg or not cfg.get("enabled"):
+        raise HTTPException(404, "OIDC provider not configured or disabled")
+    try:
+        disc = _oidc_discovery(cfg["issuer"])
+    except Exception as exc:
+        raise HTTPException(502, f"OIDC discovery failed: {exc}")
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(64)
+    challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+    conn = _canonical_conn()
+    try:
+        conn.execute(
+            "INSERT INTO oidc_login_states(state,provider_id,code_verifier,nonce,redirect_to,created_at,expires_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (state, cfg["provider_id"], verifier, nonce, redirect_to,
+             datetime.now(timezone.utc).isoformat(),
+             (datetime.now(timezone.utc).timestamp() + 600).__str__()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    from urllib.parse import urlencode
+    params = {
+        "response_type": "code",
+        "client_id": cfg["client_id"],
+        "redirect_uri": cfg["redirect_uri"],
+        "scope": cfg.get("scopes", "openid profile email"),
+        "state": state,
+        "nonce": nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    auth_url = disc["authorization_endpoint"] + "?" + urlencode(params)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(auth_url, status_code=302)
+
+
+@app.get("/api/auth/oidc/{provider_id}/callback")
+def oidc_callback(provider_id: str, code: str = "", state: str = "", error: str = ""):
+    if error:
+        raise HTTPException(400, f"OIDC error: {error}")
+    if not code or not state:
+        raise HTTPException(400, "missing code or state")
+    conn = _canonical_conn()
+    try:
+        row = conn.execute(
+            "SELECT provider_id,code_verifier,nonce,redirect_to,expires_at "
+            "FROM oidc_login_states WHERE state=?",
+            (state,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(400, "invalid or expired state")
+        st_provider, verifier, nonce, redirect_to, expires_at = row
+        if st_provider != provider_id:
+            raise HTTPException(400, "provider mismatch")
+        conn.execute("DELETE FROM oidc_login_states WHERE state=?", (state,))
+        conn.commit()
+        cfg = _oidc_provider_config(conn, provider_id)
+    finally:
+        conn.close()
+    if not cfg:
+        raise HTTPException(404, "OIDC provider not configured")
+    # expiry check (best-effort)
+    try:
+        if expires_at and float(expires_at) < datetime.now(timezone.utc).timestamp():
+            raise HTTPException(400, "login state expired")
+    except ValueError:
+        pass
+    secret = os.environ.get(cfg.get("client_secret_env") or "", "")
+    try:
+        disc = _oidc_discovery(cfg["issuer"])
+    except Exception as exc:
+        raise HTTPException(502, f"OIDC discovery failed: {exc}")
+    import httpx
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": cfg["redirect_uri"],
+        "client_id": cfg["client_id"],
+        "code_verifier": verifier,
+    }
+    if secret:
+        token_data["client_secret"] = secret
+    with httpx.Client(timeout=15.0) as client:
+        tr = client.post(disc["token_endpoint"], data=token_data)
+        tr.raise_for_status()
+        tokens = tr.json()
+    id_token = tokens.get("id_token")
+    claims = {}
+    if id_token:
+        jwks_uri = disc.get("jwks_uri")
+        signing_key = None
+        if jwks_uri:
+            from jwt import PyJWKClient
+            jwk_client = PyJWKClient(jwks_uri)
+            signing_key = jwk_client.get_signing_key_from_jwt(id_token).key
+        try:
+            claims = jwt.decode(
+                id_token,
+                signing_key or secret or "",
+                algorithms=["RS256", "HS256"],
+                audience=cfg["client_id"],
+                issuer=cfg["issuer"],
+                options={"verify_exp": True},
+            )
+        except Exception as exc:
+            raise HTTPException(401, f"invalid ID token: {exc}")
+        if claims.get("nonce") != nonce:
+            raise HTTPException(401, "nonce mismatch")
+    else:
+        # fallback to userinfo
+        access_token = tokens.get("access_token")
+        if not access_token:
+            raise HTTPException(400, "no ID token or access token")
+        with httpx.Client(timeout=15.0) as client:
+            ur = client.get(disc.get("userinfo_endpoint", cfg["issuer"].rstrip("/") + "/userinfo"),
+                            headers={"Authorization": f"Bearer {access_token}"})
+            ur.raise_for_status()
+            claims = ur.json()
+    email = claims.get("email") or claims.get("preferred_username")
+    if not email:
+        raise HTTPException(400, "OIDC token missing email")
+    display_name = claims.get("name") or claims.get("given_name") or str(email).split("@")[0]
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT user_id FROM users WHERE email=?", (str(email).lower(),)).fetchone()
+        if row:
+            user_id = row[0]
+        else:
+            user_id = create_user(conn, str(email), secrets.token_hex(16), display_name=display_name)
+        session_token = create_session(conn, user_id, user_agent="oidc",
+                                      ip="")  # placeholder; request not available in this helper
+        log_audit(conn, None, user_id, "oidc_login", "user", user_id, {"provider": provider_id})
+    finally:
+        conn.close()
+    from fastapi.responses import RedirectResponse
+    frontend = os.environ.get("ASRBRAIN_FRONTEND_URL", "http://127.0.0.1:3000")
+    resp = RedirectResponse((redirect_to if redirect_to.startswith("/") else "/"), status_code=302)
+    # If redirect_to is relative, redirect to frontend origin
+    if redirect_to.startswith("/"):
+        resp = RedirectResponse(frontend.rstrip("/") + redirect_to, status_code=302)
+    resp.set_cookie("asrbrain_session", session_token, httponly=True, samesite="lax")
+    return resp
