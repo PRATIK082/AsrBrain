@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -103,6 +103,31 @@ MIGRATION_V6 = [
         created_by TEXT, created_at TEXT, active INT DEFAULT 0, note TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_version ON pipeline_configs(version)",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_configs_active ON pipeline_configs(active)",
+]
+
+
+MIGRATION_V7 = [
+    """CREATE TABLE IF NOT EXISTS test_runs(
+        run_id TEXT PRIMARY KEY, name TEXT, created_by TEXT, created_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS test_results(
+        result_id TEXT PRIMARY KEY, run_id TEXT, test_case_id TEXT, requirement_id TEXT,
+        module TEXT, status TEXT NOT NULL, message TEXT, created_at TEXT,
+        FOREIGN KEY (run_id) REFERENCES test_runs(run_id))""",
+    "CREATE INDEX IF NOT EXISTS idx_test_results_run ON test_results(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_test_results_req ON test_results(requirement_id)",
+    "CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status)",
+    """CREATE TABLE IF NOT EXISTS defects(
+        defect_id TEXT PRIMARY KEY, title TEXT NOT NULL, requirement_id TEXT,
+        severity TEXT, status TEXT DEFAULT 'open', created_by TEXT, created_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_defects_req ON defects(requirement_id)",
+    """CREATE TABLE IF NOT EXISTS safety_goals(
+        goal_id TEXT PRIMARY KEY, asil TEXT, description TEXT, requirement_id TEXT,
+        created_by TEXT, created_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_safety_goals_req ON safety_goals(requirement_id)",
+    """CREATE TABLE IF NOT EXISTS model_usage(
+        usage_id TEXT PRIMARY KEY, model TEXT, kind TEXT, latency_ms REAL,
+        prompt_chars INT, created_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_model_usage_model ON model_usage(model)",
 ]
 
 
@@ -249,6 +274,12 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 6, "pipeline config versioning (Slice 4)")
         version = 6
+    if version < 7 <= target:
+        for stmt in MIGRATION_V7:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 7, "test results, defects, safety goals (P2)")
+        version = 7
     conn.commit()
     return version
 

@@ -1,0 +1,9 @@
+{
+  "profile": "onprem-server",
+  "description": "Team server on company LAN or on-prem VM",
+  "defaults": {
+    "strict_local_only": false,
+    "cloud_routing_enabled": false,
+    "vendor_plugins_enabled": false
+  }
+}

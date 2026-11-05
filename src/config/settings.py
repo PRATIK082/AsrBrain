@@ -77,6 +77,7 @@ class Settings:
     cloud_routing_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_CLOUD_ROUTING_ENABLED", False))
     strict_local_only: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_STRICT_LOCAL_ONLY", True))
     vendor_plugins_enabled: bool = field(default_factory=lambda: _env_bool("ASRBRAIN_VENDOR_PLUGINS_ENABLED", False))
+    deployment_profile: str = field(default_factory=lambda: _get("ASRBRAIN_DEPLOYMENT_PROFILE", "workstation"))
 
 
 settings = Settings()

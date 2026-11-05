@@ -10,6 +10,10 @@ if str(ROOT) not in sys.path:
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
+import time
+import uuid
+import logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -24,6 +28,7 @@ from src.workflows.stages import run_staged
 from src.generation.providers import ProviderSpec, list_ollama_models
 from src.chat.store import ChatStore, classify_outcome
 from src.schema.evidence import normalize_evidence
+from src.system.context import build_self_context
 from src.ingestion.pipeline import run as run_ingest
 from src.ingestion.migrations import migrate as migrate_canonical
 from src.security.auth import (hash_password, verify_password, create_session,
@@ -41,9 +46,39 @@ from src.evaluation.datasets import write_seed
 
 app = FastAPI(title="AsrBrain API")
 
+
+@app.middleware("http")
+async def _observability_middleware(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid.uuid4())
+    start = time.time()
+    # Simple per-client rate limit
+    client = request.client.host if request.client else "unknown"
+    now = time.time()
+    bucket = _RATE_BUCKETS.setdefault(client, [])
+    bucket[:] = [t for t in bucket if now - t < 60]
+    if len(bucket) >= _RATE_LIMIT:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "rate limit exceeded"}, status_code=429,
+                            headers={"X-Request-ID": rid})
+    bucket.append(now)
+    response = await call_next(request)
+    dur_ms = round((time.time() - start) * 1000, 1)
+    response.headers["X-Request-ID"] = rid
+    _METRICS["requests"] += 1
+    _METRICS["latency_ms_sum"] += dur_ms
+    if response.status_code >= 400:
+        _METRICS["errors"] += 1
+    _logger.info("%s %s %s %sms rid=%s", request.method, request.url.path,
+                 response.status_code, dur_ms, rid)
+    return response
+
 _pipe: RetrievalPipeline | None = None
 _store = ChatStore()
 _cancel: dict[str, bool] = {}
+_logger = logging.getLogger("asrbrain.api")
+_RATE_BUCKETS: dict[str, list[float]] = {}
+_RATE_LIMIT = int(os.environ.get("ASRBRAIN_RATE_LIMIT_PER_MIN", "120"))
+_METRICS: dict[str, float] = {"requests": 0, "errors": 0, "latency_ms_sum": 0.0}
 
 
 def _canonical_conn():
@@ -104,6 +139,117 @@ def get_pipe() -> RetrievalPipeline:
 def health():
     return {"status": "ok", "llm": settings.llm_model, "backend": settings.embedding_backend,
             "pipeline": PIPELINE_VERSION}
+
+
+@app.get("/api/context")
+def self_context():
+    """Machine-readable description of this instance (profile, capabilities, data, health)."""
+    return build_self_context()
+
+
+@app.get("/api/features")
+def feature_catalog():
+    """List discoverable features and their availability on this instance."""
+    return {"features": build_self_context()["features"]}
+
+
+@app.get("/api/admin/metrics")
+def admin_metrics(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    reqs = _METRICS["requests"] or 1
+    return {
+        "requests": int(_METRICS["requests"]),
+        "errors": int(_METRICS["errors"]),
+        "avg_latency_ms": round(_METRICS["latency_ms_sum"] / reqs, 1),
+        "context": build_self_context(),
+    }
+
+
+@app.get("/api/admin/backup")
+def admin_backup(request: Request):
+    """Create a zip backup of canonical and chat databases (authenticated)."""
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    import zipfile
+    from pathlib import Path
+    backup_dir = Path("data/backups")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out = backup_dir / f"asrbrain-backup-{stamp}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in (settings.canonical_db, "data/canonical/chat.db"):
+            path = Path(p)
+            if path.exists():
+                zf.write(path, arcname=path.name)
+    log_audit(_canonical_conn(), None, user, "backup", "system", str(out))
+    return {"backup_path": str(out), "created_by": user}
+
+
+@app.post("/api/admin/restore")
+async def admin_restore(request: Request, file: UploadFile = File(...)):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    import zipfile
+    import tempfile
+    from pathlib import Path
+    import shutil
+    content = await file.read()
+    tmp = Path(tempfile.mkdtemp())
+    zip_path = tmp / "restore.zip"
+    zip_path.write_bytes(content)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp / "extracted")
+    except Exception as exc:
+        raise HTTPException(400, f"invalid zip: {exc}")
+    extracted = tmp / "extracted"
+    # Safety: only known db files
+    for name in ("canonical.db", "chat.db"):
+        src = extracted / name
+        if src.exists():
+            dst = Path("data/canonical") / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                shutil.copy2(dst, dst.with_suffix(dst.suffix + ".pre-restore"))
+            shutil.copy2(src, dst)
+    log_audit(_canonical_conn(), None, user, "restore", "system", file.filename)
+    return {"restored": True, "by": user}
+
+
+@app.get("/api/admin/embedding-benchmark")
+def embedding_benchmark(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    finally:
+        conn.close()
+    return {"backend": settings.embedding_backend, "chunks": chunks,
+            "note": "Switch ASRBRAIN_EMBEDDING_BACKEND and re-index to compare; golden-set eval provides metrics."}
+
+
+@app.post("/api/admin/purge")
+def admin_purge(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    if body.get("confirm") != "DELETE ALL DATA":
+        raise HTTPException(400, "confirm must be 'DELETE ALL DATA'")
+    conn = _canonical_conn()
+    try:
+        for t in ("chunks", "documents", "tables", "figures"):
+            conn.execute(f"DELETE FROM {t}")
+        conn.commit()
+        log_audit(conn, None, user, "purge", "system", "all", {"confirmed": True})
+    finally:
+        conn.close()
+    return {"purged": True, "by": user}
 
 
 @app.post("/query")
@@ -581,8 +727,23 @@ def _provider_spec(req: ChatRequest) -> ProviderSpec:
         return ProviderSpec(kind="openai_compat", model=req.model or "gpt-4o-mini",
                             base_url=req.base_url or "https://api.openai.com/v1",
                             api_key=req.api_key, timeout_s=settings.ollama_timeout_s)
-    from src.generation.answer import pick_model
-    return ProviderSpec(kind="ollama", model=req.model or pick_model(),
+    # Per-task model routing: prefer a registered provider for chat when available.
+    try:
+        conn = _canonical_conn()
+        try:
+            from src.generation.provider_registry import list_providers, to_spec
+            providers = list_providers(conn, task="chat")
+            if providers and not req.model:
+                return to_spec(providers[0])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    from src.generation.answer import pick_model, available_models
+    model = req.model or pick_model()
+    if model not in available_models() and available_models():
+        model = pick_model()
+    return ProviderSpec(kind="ollama", model=model,
                         base_url=settings.ollama_base_url, timeout_s=settings.ollama_timeout_s)
 
 
@@ -996,6 +1157,30 @@ def api_arxml_topology(artifact_id: str, tenant: str = "default"):
     return entry["topology"].model_dump()
 
 
+@app.get("/api/arxml/topology/mermaid")
+def api_arxml_topology_mermaid(artifact_id: str, tenant: str = "default"):
+    entry = _ARXML_STORE.get(artifact_id)
+    if not entry or entry["topology"].artifact.tenant_id != tenant:
+        raise HTTPException(404, "artifact not found or access denied")
+    topo = entry["topology"]
+    lines = ["flowchart LR"]
+    ids = {}
+    for c in topo.components:
+        nid = "C" + str(len(ids))
+        ids[c.qualified_name] = nid
+        lines.append(f'  {nid}["{c.short_name}"]')
+    for conn in topo.connectors:
+        src = ids.get(conn.provider_component_ref or "")
+        dst = ids.get(conn.requester_component_ref or "")
+        if src and dst:
+            label = conn.connector_type or "conn"
+            lines.append(f'  {src} -->|{label}| {dst}')
+    if not any("-->" in l for l in lines):
+        # fallback: list components only
+        pass
+    return {"mermaid": "\\n".join(lines)}
+
+
 @app.get("/api/arxml/nodes/{node_id}/neighbors")
 def api_arxml_neighbors(node_id: str, artifact_id: str, tenant: str = "default", depth: int = 1):
     from src.ingestion.arxml import neighbors
@@ -1243,3 +1428,226 @@ def api_evaluation_review_sample():
     pending = [r for r in rows if not (r.get("review_decision") or "").strip()]
     return {"available": True, "path": path, "total": len(rows), "pending": len(pending),
             "rows": rows[:50]}
+
+
+# ---------------- Test results, defects, release delta, config diff (P2) ----------------
+class TestResultIngest(BaseModel):
+    run_name: str = "manual"
+    results: list[dict]
+
+
+@app.post("/api/test-results")
+def ingest_test_results(body: TestResultIngest, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        run_id = "tr-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO test_runs(run_id,name,created_by,created_at) VALUES (?,?,?,?)",
+                     (run_id, body.run_name, user, datetime.now(timezone.utc).isoformat()))
+        for r in body.results:
+            conn.execute(
+                "INSERT INTO test_results(result_id,run_id,test_case_id,requirement_id,module,status,message,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                ("tres-" + uuid.uuid4().hex[:12], run_id, r.get("test_case_id"), r.get("requirement_id"),
+                 r.get("module"), str(r.get("status", "unknown")), r.get("message"), datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "ingest_test_results", "test_run", run_id, {"count": len(body.results)})
+    finally:
+        conn.close()
+    return {"run_id": run_id, "ingested": len(body.results)}
+
+
+@app.get("/api/test-results")
+def list_test_results(request: Request, status: str = "", requirement_id: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT result_id,run_id,test_case_id,requirement_id,module,status,message,created_at FROM test_results WHERE 1=1"
+        args = []
+        if status:
+            q += " AND status=?"; args.append(status)
+        if requirement_id:
+            q += " AND requirement_id=?"; args.append(requirement_id)
+        rows = [dict(zip(["result_id","run_id","test_case_id","requirement_id","module","status","message","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"results": rows, "count": len(rows)}
+
+
+@app.get("/api/test-results/clusters")
+def cluster_failures(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        rows = conn.execute("SELECT status,message,COUNT(*) FROM test_results WHERE status!='passed' GROUP BY status,message").fetchall()
+        clusters = [{"status": r[0], "message": r[1], "count": r[2]} for r in rows]
+    finally:
+        conn.close()
+    return {"clusters": clusters}
+
+
+@app.post("/api/defects")
+def create_defect(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        did = "def-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO defects(defect_id,title,requirement_id,severity,status,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
+                     (did, body.get("title", "untitled"), body.get("requirement_id"), body.get("severity", "medium"),
+                      "open", user, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "create_defect", "defect", did)
+    finally:
+        conn.close()
+    return {"defect_id": did}
+
+
+@app.get("/api/defects")
+def list_defects(request: Request, status: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT defect_id,title,requirement_id,severity,status,created_by,created_at FROM defects"
+        args = []
+        if status:
+            q += " WHERE status=?"; args.append(status)
+        rows = [dict(zip(["defect_id","title","requirement_id","severity","status","created_by","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"defects": rows, "count": len(rows)}
+
+
+@app.post("/api/safety-goals")
+def create_safety_goal(body: dict, request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        gid = "sg-" + uuid.uuid4().hex[:12]
+        conn.execute("INSERT INTO safety_goals(goal_id,asil,description,requirement_id,created_by,created_at) VALUES (?,?,?,?,?,?)",
+                     (gid, body.get("asil", "QM"), body.get("description", ""), body.get("requirement_id"),
+                      user, datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        log_audit(conn, None, user, "create_safety_goal", "safety_goal", gid)
+    finally:
+        conn.close()
+    return {"goal_id": gid}
+
+
+@app.get("/api/safety-goals")
+def list_safety_goals(request: Request, asil: str = ""):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        q = "SELECT goal_id,asil,description,requirement_id,created_by,created_at FROM safety_goals"
+        args = []
+        if asil:
+            q += " WHERE asil=?"; args.append(asil)
+        rows = [dict(zip(["goal_id","asil","description","requirement_id","created_by","created_at"], r))
+                for r in conn.execute(q, args).fetchall()]
+    finally:
+        conn.close()
+    return {"safety_goals": rows, "count": len(rows)}
+
+
+@app.post("/api/auth/sso/login")
+def auth_sso_login(body: dict, request: Request, response: Response):
+    secret = os.environ.get("ASRBRAIN_SSO_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "SSO not configured (set ASRBRAIN_SSO_SECRET)")
+    token = body.get("token", "")
+    if not token:
+        raise HTTPException(400, "token required")
+    try:
+        import jwt
+        claims = jwt.decode(token, secret, algorithms=["HS256"])
+    except Exception as exc:
+        raise HTTPException(401, f"invalid SSO token: {exc}")
+    email = claims.get("email") or claims.get("sub")
+    if not email:
+        raise HTTPException(400, "token missing email/sub")
+    display_name = claims.get("name") or str(email).split("@")[0]
+    conn = _canonical_conn()
+    try:
+        row = conn.execute("SELECT user_id FROM users WHERE email=?", (str(email).lower(),)).fetchone()
+        if row:
+            user_id = row[0]
+        else:
+            user_id = create_user(conn, str(email), os.urandom(16).hex(), display_name=display_name)
+        token_val = create_session(conn, user_id, user_agent=request.headers.get("user-agent", ""),
+                                  ip=request.client.host if request.client else "")
+    finally:
+        conn.close()
+    response.set_cookie("asrbrain_session", token_val, httponly=True, samesite="lax")
+    return {"user_id": user_id, "email": email}
+
+
+@app.get("/api/model-usage")
+def model_usage(request: Request):
+    user = _require_user(request)
+    if not user:
+        raise HTTPException(401, "authentication required")
+    conn = _canonical_conn()
+    try:
+        rows = [dict(zip(["usage_id","model","kind","latency_ms","prompt_chars","created_at"], r))
+                for r in conn.execute("SELECT usage_id,model,kind,latency_ms,prompt_chars,created_at FROM model_usage ORDER BY created_at DESC LIMIT 100").fetchall()]
+    finally:
+        conn.close()
+    return {"usage": rows, "count": len(rows)}
+
+
+@app.get("/api/releases/delta")
+def release_delta(base: str, target: str):
+    conn = _canonical_conn()
+    try:
+        base_chunks = conn.execute("SELECT chunk_id,requirement_ids FROM chunks WHERE autosar_release=?", (base,)).fetchall()
+        target_chunks = conn.execute("SELECT chunk_id,requirement_ids FROM chunks WHERE autosar_release=?", (target,)).fetchall()
+        base_ids = {r[0] for r in base_chunks}
+        target_ids = {r[0] for r in target_chunks}
+        base_reqs = {rid for r in base_chunks for rid in (r[1] or "").split(",") if rid}
+        target_reqs = {rid for r in target_chunks for rid in (r[1] or "").split(",") if rid}
+    finally:
+        conn.close()
+    return {
+        "base": base, "target": target,
+        "base_chunks": len(base_ids), "target_chunks": len(target_ids),
+        "added_chunks": len(target_ids - base_ids), "removed_chunks": len(base_ids - target_ids),
+        "added_requirements": sorted(target_reqs - base_reqs)[:50],
+        "removed_requirements": sorted(base_reqs - target_reqs)[:50],
+    }
+
+
+@app.get("/api/config/pipeline/diff")
+def config_diff(from_version: int, to_version: int):
+    conn = _canonical_conn()
+    try:
+        from src.config.pipeline_config import list_configs
+        configs = list_configs(conn)
+    finally:
+        conn.close()
+    a = next((c for c in configs if c.get("version") == from_version), None)
+    b = next((c for c in configs if c.get("version") == to_version), None)
+    if not a or not b:
+        raise HTTPException(404, "config version not found")
+    import json as _json
+    try:
+        from src.diff.engine import diff_records
+        diff = diff_records([a], [b])
+    except Exception:
+        diff = {"from": a.get("config_json"), "to": b.get("config_json")}
+    return {"from_version": from_version, "to_version": to_version, "diff": diff}

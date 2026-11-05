@@ -36,6 +36,9 @@ export const api = {
   evaluationGate: () => json("/api/evaluation/gate"),
   evaluationGolden: () => json("/api/evaluation/golden"),
   evaluationReviewSample: () => json("/api/evaluation/review-sample"),
+  context: () => json("/api/context"),
+  features: () => json("/api/features"),
+  adminMetrics: () => json("/api/admin/metrics"),
 };
 
 /** SSE reader for POST /api/chat/stream — yields parsed StreamEvents. */

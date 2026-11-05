@@ -406,6 +406,18 @@ with st.sidebar:
                        file_name="conversation.md", use_container_width=True)
 
 # ---------------- main chat ----------------
+try:
+    from src.system.context import build_self_context as _build_ctx
+    _ctx = _build_ctx()
+    with st.expander("System status", expanded=False):
+        st.write(f"Profile: {_ctx['profile']} | Health: {_ctx['health']}")
+        if _ctx.get("recommended_actions"):
+            for _a in _ctx["recommended_actions"]:
+                st.write(f"- {_a}")
+        st.caption(f"LLM: {_ctx['models'].get('llm_model')} ({_ctx['models'].get('ollama', {}).get('status')})")
+except Exception as _e:
+    st.warning(f"System context unavailable: {_e}")
+
 conv = store.get(st.session_state.cid) or {"messages": [], "slots": {}}
 if not conv.get("messages"):
     _scope = f"{st.session_state.get('scope_type', 'project')}:{st.session_state.get('scope_name', 'default')}"

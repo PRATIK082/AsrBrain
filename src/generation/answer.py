@@ -1,7 +1,10 @@
 """Ollama + cloud generation with deterministic fallback (works without any LLM)."""
 from __future__ import annotations
 import re
+import time
 import httpx
+import sqlite3
+from pathlib import Path
 from ..config.settings import settings, TOKEN_CAPS
 from .prompts import build_prompt
 from .providers import ProviderSpec, complete as _provider_complete
@@ -48,16 +51,23 @@ def pick_model() -> str:
     return models[0]
 
 
-def extractive_fallback(query: str, evidence: list[dict]) -> str:
-    """No-LLM path: returns top compressed passages with evidence labels. Never hallucinates."""
+def extractive_fallback(query: str, evidence: list[dict], note: str = "") -> str:
+    """No-LLM path: never hallucinates. Shows a short reason and source list only."""
     lines = ["## Direct answer (extractive fallback — no LLM available)", ""]
-    for i, c in enumerate(evidence[:5], start=1):
-        lines.append(f"[E{i}] p.{c.get('page_start')}: {c.get('compressed', c.get('normalized_text',''))[:800]}")
+    if note:
+        lines.append(f"**Reason:** {note}")
         lines.append("")
+    lines.append("No LLM was available to synthesize an answer from the retrieved evidence. "
+                 "The sources below are the best matches; connect an LLM (Ollama or cloud) "
+                 "for a synthesized, cited answer.")
+    lines.append("")
     lines.append("## Sources")
-    for i, c in enumerate(evidence[:5], start=1):
+    for i, c in enumerate(evidence[:8], start=1):
+        snippet = (c.get("compressed") or c.get("normalized_text") or "")[:240].replace("\n", " ")
         lines.append(f"[E{i}] {c.get('source_pdf')} p.{c.get('page_start')}-{c.get('page_end')} "
                      f"({c.get('autosar_release') or 'unknown'}/{c.get('platform') or 'unknown'})")
+        if snippet:
+            lines.append(f"    {snippet}")
     return "\n".join(lines)
 
 
@@ -68,22 +78,60 @@ def default_spec() -> ProviderSpec:
                         timeout_s=settings.ollama_timeout_s)
 
 
+def _record_usage(model: str, kind: str, start: float, prompt_chars: int) -> None:
+    try:
+        import uuid, sqlite3, time
+        from datetime import datetime, timezone
+        conn = sqlite3.connect(settings.canonical_db)
+        conn.execute("INSERT INTO model_usage(usage_id,model,kind,latency_ms,prompt_chars,created_at) VALUES (?,?,?,?,?,?)",
+                     ("mu-" + uuid.uuid4().hex[:12], model, kind,
+                      round((time.time() - start) * 1000, 1), prompt_chars,
+                      datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _record_usage(model: str, kind: str, start: float, prompt_chars: int) -> None:
+    try:
+        import uuid, sqlite3, time
+        from datetime import datetime, timezone
+        conn = sqlite3.connect(settings.canonical_db)
+        conn.execute("INSERT INTO model_usage(usage_id,model,kind,latency_ms,prompt_chars,created_at) VALUES (?,?,?,?,?,?)",
+                     ("mu-" + uuid.uuid4().hex[:12], model, kind,
+                      round((time.time() - start) * 1000, 1), prompt_chars,
+                      datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def generate(query: str, evidence: list[dict], comparison: bool = False,
              spec: ProviderSpec | None = None, intent: str = "") -> dict:
+    import time
+    start = time.time()
     if spec is None:
         # legacy path: local Ollama default (keeps POST /query working unchanged)
         ok, msg = ollama_available()
         if not ok:
-            return {"draft": extractive_fallback(query, evidence), "llm": "fallback", "note": msg}
-        return _generate_ollama(query, evidence, comparison, intent=intent)
+            _record_usage("fallback", "ollama", start, len(query))
+            return {"draft": extractive_fallback(query, evidence, note=msg), "llm": "fallback", "note": msg}
+        out = _generate_ollama(query, evidence, comparison, intent=intent)
+        _record_usage(out.get("llm", "ollama"), "ollama", start, len(query))
+        return out
     if not evidence:
-        return {"draft": extractive_fallback(query, evidence), "llm": "fallback",
+        _record_usage("fallback", spec.kind, start, len(query))
+        return {"draft": extractive_fallback(query, evidence, note="no evidence"), "llm": "fallback",
                 "note": "no evidence"}
     prompt = build_prompt(query, evidence, comparison, intent=intent)
     draft, note = _provider_complete(prompt, spec)
     if draft:
+        _record_usage(f"{spec.kind}:{spec.model}", spec.kind, start, len(prompt))
         return {"draft": draft, "llm": f"{spec.kind}:{spec.model}"}
-    return {"draft": extractive_fallback(query, evidence), "llm": "fallback", "note": note}
+    _record_usage("fallback", spec.kind, start, len(prompt))
+    return {"draft": extractive_fallback(query, evidence, note=note), "llm": "fallback", "note": note}
 
 
 def _generate_ollama(query: str, evidence: list[dict], comparison: bool = False,
@@ -98,7 +146,7 @@ def _generate_ollama(query: str, evidence: list[dict], comparison: bool = False,
                        timeout=settings.ollama_timeout_s)
         if r.status_code == 200:
             return {"draft": r.json().get("response", ""), "llm": model}
-        return {"draft": extractive_fallback(query, evidence), "llm": "fallback",
+        return {"draft": extractive_fallback(query, evidence, note=f"HTTP {r.status_code}"), "llm": "fallback",
                 "note": f"HTTP {r.status_code}"}
     except Exception as e:
-        return {"draft": extractive_fallback(query, evidence), "llm": "fallback", "note": str(e)}
+        return {"draft": extractive_fallback(query, evidence, note=str(e)), "llm": "fallback", "note": str(e)}

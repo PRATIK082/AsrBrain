@@ -1,0 +1,9 @@
+{
+  "profile": "workstation",
+  "description": "Single-user local workstation with optional Ollama",
+  "defaults": {
+    "strict_local_only": true,
+    "cloud_routing_enabled": false,
+    "vendor_plugins_enabled": false
+  }
+}

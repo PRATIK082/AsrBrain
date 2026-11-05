@@ -1,0 +1,9 @@
+{
+  "profile": "cloud-saas",
+  "description": "Hosted SaaS deployment",
+  "defaults": {
+    "strict_local_only": false,
+    "cloud_routing_enabled": true,
+    "vendor_plugins_enabled": false
+  }
+}
