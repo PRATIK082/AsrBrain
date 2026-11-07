@@ -18,6 +18,7 @@ class QueryPlan(BaseModel):
     api_names: list[str] = Field(default_factory=list)
     requirement_ids: list[str] = Field(default_factory=list)
     configuration_parameters: list[str] = Field(default_factory=list)
+    asil_levels: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     expected_evidence: list[str] = Field(default_factory=list)

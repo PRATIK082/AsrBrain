@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime, timezone
 
 BASELINE_VERSION = 1
-CURRENT_VERSION = 7
+CURRENT_VERSION = 9
 
 # Evidence-id layout written by the v1 pipeline: tbl-doc-<12hex>-<page>-<n>
 _EVIDENCE_RE = re.compile(r"^(tbl|fig)-(doc-[0-9a-f]{12})-(\d+)-(\d+)$")
@@ -191,6 +191,28 @@ MIGRATION_V4 = [
 ]
 
 
+MIGRATION_V8 = [
+    """CREATE TABLE IF NOT EXISTS oidc_providers(
+        provider_id TEXT PRIMARY KEY, name TEXT NOT NULL, issuer TEXT NOT NULL,
+        client_id TEXT NOT NULL, client_secret_env TEXT, redirect_uri TEXT NOT NULL,
+        scopes TEXT DEFAULT 'openid profile email', enabled INT DEFAULT 1,
+        created_by TEXT, created_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_oidc_providers_enabled ON oidc_providers(enabled)",
+    """CREATE TABLE IF NOT EXISTS oidc_login_states(
+        state TEXT PRIMARY KEY, provider_id TEXT NOT NULL, code_verifier TEXT NOT NULL,
+        nonce TEXT NOT NULL, redirect_to TEXT, created_at TEXT, expires_at TEXT,
+        FOREIGN KEY (provider_id) REFERENCES oidc_providers(provider_id))""",
+    "CREATE INDEX IF NOT EXISTS idx_oidc_login_states_provider ON oidc_login_states(provider_id)",
+]
+
+
+MIGRATION_V9 = [
+    "ALTER TABLE documents ADD COLUMN asil TEXT",
+    "ALTER TABLE chunks ADD COLUMN asil TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_chunks_asil ON chunks(asil)",
+]
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     try:
         return {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -280,6 +302,21 @@ def migrate(conn: sqlite3.Connection, target: int = CURRENT_VERSION) -> int:
         conn.commit()
         _record_version(conn, 7, "test results, defects, safety goals (P2)")
         version = 7
+    if version < 8 <= target:
+        for stmt in MIGRATION_V8:
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 8, "OIDC provider configuration and login state")
+        version = 8
+    if version < 9 <= target:
+        for stmt in MIGRATION_V9:
+            m = re.match(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", stmt)
+            if m and m.group(2) in _columns(conn, m.group(1)):
+                continue
+            conn.execute(stmt)
+        conn.commit()
+        _record_version(conn, 9, "ASIL metadata columns")
+        version = 9
     conn.commit()
     return version
 

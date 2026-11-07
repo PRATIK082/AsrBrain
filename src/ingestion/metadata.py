@@ -145,3 +145,16 @@ def infer_module(text: str) -> str:
         return ""
     best = max(scores, key=lambda k: scores[k])
     return best if scores[best] >= 5 else ""
+
+
+ASIL_LEVELS = ("QM", "A", "B", "C", "D")
+ASIL_PRIORITY = {"QM": 0, "A": 1, "B": 2, "C": 3, "D": 4}
+
+
+def detect_asil(text: str) -> str:
+    """Return comma-separated ASIL levels found in text, highest severity first."""
+    found = set(re.findall(r"\bASIL\s*[- ]?\s*(QM|A|B|C|D)\b", text or "", re.IGNORECASE))
+    if not found:
+        return ""
+    ordered = sorted(found, key=lambda x: ASIL_PRIORITY.get(x.upper(), 0), reverse=True)
+    return ",".join(ordered)
